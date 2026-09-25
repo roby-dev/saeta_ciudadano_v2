@@ -30,6 +30,9 @@ dependencies:
   url_launcher: ^6.3.0
   # Native device contact picker (no READ_CONTACTS permission required)
   flutter_native_contact_picker: ^0.0.12
+  # Realtime updates over Socket.IO (compatible with the backend's
+  # socket.io v4 server; the Dart client's v3.x line targets engine.io v4)
+  socket_io_client: ^3.1.6
 
 dev_dependencies:
   flutter_test:

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../domain/entities/citizen_alert_entity.dart';
 import '../../domain/usecases/get_user_alerts_usecase.dart';
 import '../../domain/usecases/send_alert_feedback_usecase.dart';
@@ -7,11 +10,20 @@ class AlertsProvider extends ChangeNotifier {
   AlertsProvider({
     required GetUserAlertsUseCase getUserAlertsUseCase,
     required SendAlertFeedbackUseCase sendAlertFeedbackUseCase,
+    required RealtimeService realtimeService,
   })  : _getUserAlertsUseCase = getUserAlertsUseCase,
-        _sendAlertFeedbackUseCase = sendAlertFeedbackUseCase;
+        _sendAlertFeedbackUseCase = sendAlertFeedbackUseCase {
+    // A raw `updatedAlert` socket payload isn't fully populated (see
+    // RealtimeService docs), so react to it by refetching via REST — a
+    // no-op via refreshAlerts() until an initial loadAlerts() has run.
+    _realtimeSubscription = realtimeService.updatedAlerts.listen((_) {
+      refreshAlerts();
+    });
+  }
 
   final GetUserAlertsUseCase _getUserAlertsUseCase;
   final SendAlertFeedbackUseCase _sendAlertFeedbackUseCase;
+  late final StreamSubscription<Map<String, dynamic>> _realtimeSubscription;
 
   List<CitizenAlertEntity> _alerts = [];
   bool _isLoading = false;
@@ -88,5 +100,11 @@ class AlertsProvider extends ChangeNotifier {
         return true;
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _realtimeSubscription.cancel();
+    super.dispose();
   }
 }

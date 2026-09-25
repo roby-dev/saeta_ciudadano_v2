@@ -1,9 +1,14 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
+import 'core/network/account_disabled_notifier.dart';
 import 'core/network/auth_interceptor.dart';
 import 'core/network/http_client.dart';
 import 'core/network/session_expired_notifier.dart';
+import 'core/realtime/io_socket_connection.dart';
+import 'core/realtime/realtime_service.dart';
+import 'core/realtime/realtime_service_impl.dart';
+import 'core/realtime/socket_connection.dart';
 import 'core/storage/secure_storage.dart';
 import 'features/alerts/data/datasources/alerts_remote_datasource.dart';
 import 'features/alerts/data/repositories/alerts_repository_impl.dart';
@@ -58,6 +63,19 @@ Future<void> setupServiceLocator() async {
   );
   sl.registerLazySingleton<SessionExpiredNotifier>(
     () => SessionExpiredNotifier(),
+  );
+  sl.registerLazySingleton<AccountDisabledNotifier>(
+    () => AccountDisabledNotifier(),
+  );
+  sl.registerLazySingleton<SocketConnection>(
+    () => IoSocketConnection(),
+  );
+  sl.registerLazySingleton<RealtimeService>(
+    () => RealtimeServiceImpl(
+      socket: sl<SocketConnection>(),
+      storage: sl<SecureStorage>(),
+      accountDisabledNotifier: sl<AccountDisabledNotifier>(),
+    ),
   );
   sl.registerLazySingleton<Dio>(
     () => HttpClient.create(),
@@ -170,6 +188,7 @@ Future<void> setupServiceLocator() async {
     () => AlertsProvider(
       getUserAlertsUseCase: sl<GetUserAlertsUseCase>(),
       sendAlertFeedbackUseCase: sl<SendAlertFeedbackUseCase>(),
+      realtimeService: sl<RealtimeService>(),
     ),
   );
 

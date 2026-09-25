@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../service_locator.dart';
 import '../../../auth/domain/entities/user_entity.dart';
@@ -24,6 +25,7 @@ class MainPage extends StatelessWidget {
         ChangeNotifierProvider<MainNavigationProvider>(
           create: (_) => MainNavigationProvider(
             storage: sl<SecureStorage>(),
+            realtimeService: sl<RealtimeService>(),
             initialUser: user,
           ),
         ),
