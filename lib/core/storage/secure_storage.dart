@@ -58,12 +58,18 @@ class SecureStorage {
     return value == 'true';
   }
 
+  /// Clears the session and resets device-local, session-scoped
+  /// preferences. This is the single choke point every end-of-session path
+  /// goes through (manual logout, `AuthInterceptor`'s session-expired
+  /// handling, and the realtime `disableUser` handler), so resetting
+  /// `sendSmsOnAlert` here — rather than in each caller — covers all three.
   Future<void> clearSession() async {
     await Future.wait([
       _storage.delete(key: AppConstants.keyToken),
       _storage.delete(key: AppConstants.keyRefreshToken),
       _storage.delete(key: AppConstants.keyUserId),
       _storage.delete(key: AppConstants.keyRememberMe),
+      setSendSmsOnAlert(false),
     ]);
   }
 }

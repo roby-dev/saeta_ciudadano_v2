@@ -96,4 +96,42 @@ void main() {
       expect(await secureStorage.getSendSmsOnAlert(), isFalse);
     });
   });
+
+  group('clearSession', () {
+    test('deletes the session keys', () async {
+      when(() => flutterSecureStorage.delete(key: any(named: 'key')))
+          .thenAnswer((_) async {});
+      when(() => flutterSecureStorage.write(
+            key: any(named: 'key'),
+            value: any(named: 'value'),
+          )).thenAnswer((_) async {});
+
+      await secureStorage.clearSession();
+
+      verify(() => flutterSecureStorage.delete(key: AppConstants.keyToken))
+          .called(1);
+      verify(() => flutterSecureStorage.delete(
+          key: AppConstants.keyRefreshToken)).called(1);
+      verify(() => flutterSecureStorage.delete(key: AppConstants.keyUserId))
+          .called(1);
+      verify(() => flutterSecureStorage.delete(
+          key: AppConstants.keyRememberMe)).called(1);
+    });
+
+    test('resets the local send-SMS-on-alert preference to false', () async {
+      when(() => flutterSecureStorage.delete(key: any(named: 'key')))
+          .thenAnswer((_) async {});
+      when(() => flutterSecureStorage.write(
+            key: AppConstants.keySendSmsOnAlert,
+            value: 'false',
+          )).thenAnswer((_) async {});
+
+      await secureStorage.clearSession();
+
+      verify(() => flutterSecureStorage.write(
+            key: AppConstants.keySendSmsOnAlert,
+            value: 'false',
+          )).called(1);
+    });
+  });
 }
