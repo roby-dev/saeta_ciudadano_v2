@@ -10,19 +10,23 @@ Bring the Flutter citizen app (`saeta_ciudadano_v2`) to functional parity with t
 ## Scope
 - T1: Token refresh on 401 (Dio interceptor, centralized Bearer header, session-expired handling).
 - T2: Emergency contacts management (max 5, picked from device contacts, "send SMS" toggle) + SMS dispatch on alert. Decision made and implemented: open the device SMS composer (no `SEND_SMS` permission, no silent SMS) — see T2 evidence below.
+- T3: Socket.IO client (real-time `updatedAlert` / `disableUser` from the backend gateway).
+- T4: Reset the local "send SMS on alert" preference at every end-of-session path.
 
-Out of scope: sockets, profile edit, photo upload, maps (tracked as later gaps).
+Out of scope: profile edit, photo upload, maps (tracked as later gaps).
 
 ## Constraints
 - Clean architecture per feature (data/domain/presentation), get_it DI, dartz Either.
 - Backend contract: `POST /v1/auth/refresh` body `{ refreshToken }` → `{ accessToken, refreshToken, user }`.
+- Backend realtime contract (`saeta-backend-v2/src/realtime/presentation/gateways/realtime.gateway.ts`, read-only, already merged on that repo's `main`): client connects with `auth: { token }` (access token only; a refresh token or missing token gets `client.disconnect(true)`); server auto-joins `user:{id}`/`role:{role}` rooms; citizen clients receive `updatedAlert` (payload: `AlertEntity`, only for alerts they own) and `disableUser` (payload: a plain string message, followed by a server-side forced disconnect); citizens never emit anything.
 - TDD: strict (source: user global config). Runner: `flutter test`.
-- Repository is not under git: work-unit commits are not possible until the user initializes one.
+- Repository is git-backed on branch `feat/realtime-socket` (from `main`); one work-unit commit per task.
 
 ## Tasks
 - [x] T1 — Token refresh interceptor (route: delegated direct — touches http_client, secure_storage, service_locator, 2 datasources, auth bloc/app navigation + tests)
 - [x] T2 — Emergency contacts + SMS on alert. Decision: open the device SMS composer (url_launcher `sms:`), no SEND_SMS permission. Also narrowed AuthInterceptor public paths: only `POST /v1/users` and `GET /v1/users/dni/:dni` are public; `PATCH`/`GET /v1/users/:id` need the Bearer header (route: delegated direct — new `emergency_contacts` feature across data/domain/presentation, `AuthInterceptor` fix, `SecureStorage`, `service_locator`, profile/emergency UI hooks + tests).
-- [ ] T3 — Socket.IO client: listen to `updatedAlert-{userId}` and `disableUser-{userId}`
+- [x] T3 — Socket.IO client: `updatedAlert` live-updates `AlertsProvider`, `disableUser` clears the session and signals the app (route: delegated direct — new `core/realtime` (interface + socket_io_client adapter + service impl), `core/network/account_disabled_notifier.dart`, `service_locator`, `app.dart`, `AlertsProvider`, `MainNavigationProvider`, `main_page.dart` wiring + tests).
+- [x] T4 — Reset the local "send SMS on alert" preference on every end-of-session path (manual logout, session expiry, `disableUser`) (route: delegated direct, bundled with T3 since it depends on T3's `disableUser` handling — one-line change in `SecureStorage.clearSession()` + tests).
 
 ## Acceptance criteria
 - T1: a 401 on an authenticated request triggers exactly one refresh (concurrent 401s share it), tokens are persisted, the original request is retried once; a failed refresh clears the session and returns the user to login. Refresh endpoint itself never loops.
@@ -41,6 +45,65 @@ Out of scope: sockets, profile edit, photo upload, maps (tracked as later gaps).
   multi-recipient URI, no `SEND_SMS` permission, no silent SMS) prefilled
   with all contact numbers and the legacy-parity message text; a composer
   launch failure never blocks or fails the alert flow.
+- T3: `RealtimeService.connect()` reads the stored access token and only
+  opens the socket when a token exists (no-op otherwise); the handshake auth
+  payload is exactly `{'token': <access token>}`, transport is
+  `websocket`-only, and the library's own auto-reconnect is disabled in
+  favor of one bounded manual retry. `disconnect()` is called on manual
+  logout and on session expiry (`SessionExpiredNotifier`). Every
+  reconnection attempt (the app's own retry, or a fresh `connect()` after
+  login) re-reads the token from `SecureStorage`, so a token refreshed by
+  `AuthInterceptor` is picked up on the socket's next (re)connection without
+  a forced immediate reconnect. After any socket disconnect that wasn't
+  requested by the app, exactly one reconnect attempt is made with the
+  current stored token; a second consecutive disconnect does not retry
+  again (no loop) until a connection succeeds or `connect()` is called
+  again. A well-formed `updatedAlert` payload triggers
+  `AlertsProvider.refreshAlerts()` (a full REST refetch) rather than being
+  parsed and rendered directly — see decision below. A `disableUser` event
+  clears the stored session (via `SecureStorage.clearSession()`, which also
+  covers T4), disconnects the socket, and emits the message on
+  `AccountDisabledNotifier` exactly once; the app layer navigates to login
+  and shows the message (not covered by automated tests — consistent with
+  `app.dart`'s existing untested `SessionExpiredNotifier` wiring from T1).
+- T4: `SecureStorage.clearSession()` also resets the local "send SMS on
+  alert" preference to `false`; since manual logout
+  (`MainNavigationProvider.logout()`), `AuthInterceptor`'s session-expired
+  path, and `RealtimeServiceImpl`'s `disableUser` handling all call
+  `clearSession()`, this single change resets the preference on all three
+  end-of-session paths.
+
+## Decisions (T3)
+- **`updatedAlert` payload handling**: the backend's `emitAlertUpdated`
+  broadcasts the raw `AlertEntity` domain object (`typeId`/`stateId` as
+  plain ids, not the populated `type`/`state` objects the REST list
+  endpoint returns — confirmed by reading
+  `saeta-backend-v2/src/alerts/domain/alert.entity.ts` and the
+  `AlertRealtimeHandler`/`update-alert.handler.ts` call chain). Parsing it
+  through the existing `CitizenAlertModel.fromJson` would silently render
+  the raw type/state id as the human-readable name (the fallback branch for
+  a bare `String` value). Rather than accept that half-populated render, or
+  duplicate the backend's populate logic on the client, `RealtimeService`
+  only forwards the raw payload as a signal; `AlertsProvider` reacts by
+  calling its existing `refreshAlerts()` (REST refetch, already
+  null-safe/no-op when no alerts were loaded yet), which is always fully
+  populated. This trades one extra REST round-trip per event for
+  correctness and reuses code instead of adding a second parsing path.
+- **Reconnection policy**: the library's automatic reconnection
+  (`Manager`) is disabled (`disableReconnection()`); the app manages
+  exactly one retry per disconnect itself (reset on the next successful
+  `connect`). This was chosen over leaving the library's default
+  (near-infinite) auto-retry running against a possibly-invalid token,
+  which would hammer the server on an auth failure — the task explicitly
+  asks for "try reconnecting once ... don't loop."
+- **Connect hook points**: `RealtimeService.connect()` is called from
+  `app.dart` in two places — once unconditionally in `initState` (covers
+  "app start with a stored session"; a no-op today since
+  `AuthBloc._onSessionChecked` doesn't yet restore a session automatically,
+  a pre-existing T1 limitation, not something T3 changes) and once from a
+  `BlocListener<AuthBloc, AuthState>` on `AuthAuthenticated` (covers
+  "connect after login"). Both funnel through the same token-gated
+  `connect()`.
 
 ## Checks
 - `flutter test`
@@ -339,3 +402,211 @@ this per the heuristic's own instructions rather than reworking the split.
 ### Backend v2 support (saeta-backend-v2, separate repo)
 - `f5053f1` (branch `fix/emergency-contact-phone-normalization`): emergency contact phones accept device formats (`+51 987 654 321`) and are normalized to 9 digits. The app can send raw numbers.
 - `15ca944` (branch `feat/realtime-user-disabled`): backend emits `disableUser-{userId}` when an admin disables an account. Refresh/login already reject disabled accounts.
+
+### T3 — Socket.IO client (done)
+
+TDD: strict, source: user global config, runner: `flutter test`. Every unit
+was written test-first: RED observed (missing `core/realtime` files, so a
+compile error — same convention as T1/T2), then implemented to GREEN. Suite
+grew from 61 tests (T2 baseline) to **78 tests, all passing** (17 new: 11
+`RealtimeServiceImpl`, 3 `AlertsProvider`, 1 `MainNavigationProvider`, 2
+`SecureStorage.clearSession` — the last 2 are T4's).
+
+#### Dependency
+
+- `socket_io_client: ^3.1.6` (resolved 3.1.6, `sdk: '>=3.0.0 <4.0.0'`, no
+  conflicts). Verified compatible with the backend's `socket.io: ^4.8.3`
+  server: this package's 3.x line targets the engine.io v4 protocol (2.x was
+  for Socket.IO v2/v3 servers). `context7` had no Dart-specific docs for
+  this package (only the JS client), so the version choice and API surface
+  were verified by reading pub.dev's package metadata and the installed
+  package source directly (`socket_io_client-3.1.6/lib/src/{socket,darty,manager}.dart`
+  in the pub cache) rather than from an unavailable doc source.
+
+#### New: `lib/core/realtime/`
+
+- `socket_connection.dart` — `SocketConnection` interface (`auth` setter,
+  `connect`/`disconnect`/`dispose`, `on`/`onConnect`/`onConnectError`/
+  `onDisconnect`). A seam so `RealtimeServiceImpl` never touches the vendor
+  `Socket` class directly, keeping it unit-testable with a mocktail mock
+  instead of a real connection.
+- `io_socket_connection.dart` — `IoSocketConnection`, the real adapter over
+  `package:socket_io_client`. Builds the underlying socket lazily on first
+  `connect()` (auto-connect is disabled, so construction alone opens no
+  I/O), transport forced to `websocket` only, and the library's own
+  automatic reconnection disabled (`disableReconnection()`) — see decision
+  below. No dedicated test, consistent with this codebase's convention for
+  thin vendor wrappers (`NativeDeviceContactPicker`,
+  `UrlLauncherSmsLauncher`).
+- `realtime_service.dart` — `RealtimeService` interface: `updatedAlerts`
+  stream (raw `Map<String, dynamic>` payloads, see decision below),
+  `connect()`, `disconnect()`.
+- `realtime_service_impl.dart` — `RealtimeServiceImpl`. `connect()` reads
+  the current token from `SecureStorage`; a null/empty token is a no-op
+  (never opens the socket). On a token, sets `auth = {'token': token}` and
+  calls the socket's `connect()`. `disconnect()` marks the disconnect as
+  deliberate (`_manualDisconnect = true`) and calls the socket's
+  `disconnect()`. Every disconnect that wasn't deliberate (`onDisconnect`/
+  `onConnectError`, which covers both network blips and an auth rejection —
+  the vendor client doesn't reliably distinguish the two, see decision
+  below) gets exactly one retry via the same `connect()` path (so it always
+  re-reads the current — possibly refreshed — token), guarded by
+  `_hasRetriedAfterDisconnect`, reset back to `false` only on the next
+  successful `onConnect`. `updatedAlert` payloads (`Map`) are forwarded
+  as-is onto a broadcast `StreamController`. `disableUser` marks the
+  disconnect as deliberate, calls `SecureStorage.clearSession()` (which
+  also resets the T4 preference), disconnects the socket, and notifies
+  `AccountDisabledNotifier` with the server's message (falls back to a
+  generic Spanish message if the payload isn't a non-empty string).
+
+#### New: `lib/core/network/account_disabled_notifier.dart`
+
+`AccountDisabledNotifier` — a broadcast `Stream<String>` signal, structurally
+identical to `SessionExpiredNotifier` (T1) but carrying the server's
+`disableUser` message. Registered as a lazy singleton in get_it. No
+dedicated test, same convention as `SessionExpiredNotifier` (exercised
+end-to-end via `RealtimeServiceImpl`'s tests instead).
+
+#### Changed: `AlertsProvider`
+
+`lib/features/alerts/presentation/providers/alerts_provider.dart` — new
+required `realtimeService` constructor parameter. Subscribes to
+`RealtimeService.updatedAlerts` and calls `refreshAlerts()` (the existing
+REST refetch, already a safe no-op before any `loadAlerts()`) on every
+event — see the "raw payload" decision below for why it doesn't parse and
+apply the event directly. `dispose()` (new override) cancels the
+subscription.
+
+#### Changed: `MainNavigationProvider` / `main_page.dart`
+
+`lib/features/main/presentation/providers/main_navigation_provider.dart` —
+new required `realtimeService` constructor parameter; `logout()` now calls
+`realtimeService.disconnect()` alongside `storage.clearSession()`.
+`lib/features/main/presentation/pages/main_page.dart` passes
+`sl<RealtimeService>()` into the `MainNavigationProvider` it creates.
+
+#### Changed: `service_locator.dart`
+
+Registers (all lazy singletons unless noted): `AccountDisabledNotifier`,
+`SocketConnection` → `IoSocketConnection()`, `RealtimeService` →
+`RealtimeServiceImpl(socket:, storage:, accountDisabledNotifier:)`. The
+existing `AlertsProvider` factory registration now also injects
+`realtimeService: sl<RealtimeService>()`.
+
+#### Changed: `app.dart`
+
+`_SaetaCiudadanoAppState` (already a `State` since T1, for the
+`SessionExpiredNotifier` subscription) gained:
+- A `GlobalKey<ScaffoldMessengerState>` passed to `MaterialApp.router` so a
+  `SnackBar` can be shown from a stream listener with no `BuildContext` of
+  its own.
+- An `AccountDisabledNotifier` subscription: navigates to login (same
+  target as the manual-logout and session-expired flows) and shows the
+  server message in a `SnackBar`. `RealtimeServiceImpl` already
+  cleared the session and disconnected before this fires.
+- The `SessionExpiredNotifier` subscription now also calls
+  `sl<RealtimeService>().disconnect()` before navigating (session expiry is
+  an end-of-session path for the socket too, not just for `SecureStorage`).
+- `sl<RealtimeService>().connect()` called once, unconditionally, in
+  `initState` (see "connect hook points" decision below), and again from a
+  new `BlocListener<AuthBloc, AuthState>` wrapping `MaterialApp.router`, on
+  `AuthAuthenticated`.
+
+Not covered by an automated test — consistent with `app.dart`'s existing
+untested `SessionExpiredNotifier` wiring from T1 (there's no widget-test
+harness for this file's stream-to-navigation glue in this codebase).
+
+#### Decisions (also recorded above, in Scope, before implementation)
+
+See "## Decisions (T3)" above for: the `updatedAlert` raw-payload/refresh
+choice, the reconnection policy (library auto-reconnect disabled, one
+bounded manual retry per disconnect, not distinguishing an auth-error
+disconnect from a network one since the vendor client doesn't expose that
+distinction reliably), and the two `connect()` hook points in `app.dart`.
+
+#### Platform notes
+
+No Android/iOS platform config changes were needed for T3. The backend base
+URL (`AppConstants.baseUrlSaeta`) is `https://...`, so the Socket.IO
+handshake and the upgraded `websocket` transport both run over TLS
+(`wss://`) automatically — no `usesCleartextTraffic`/network-security-config
+change, and no new `<queries>` entry (unlike T2's `sms:` scheme, a raw
+WebSocket connection isn't an intent the OS needs to resolve).
+`AndroidManifest.xml` doesn't declare `android.permission.INTERNET`
+explicitly, but this was already true before T3 and the app's existing REST
+calls (T1/T2) already depend on network access working, so it's a
+pre-existing condition (very likely satisfied by a plugin's merged
+manifest) rather than something T3 introduced or needs to fix.
+
+#### Commands run (foreground)
+
+- `flutter pub get`: success, `socket_io_client` (+ `socket_io_common`)
+  added; no errors (36 packages have newer versions incompatible with
+  current constraints, pre-existing/unrelated).
+- `flutter test`: **78/78 passed, 0 failed**.
+- `flutter analyze`: **No issues found!** (after switching a test helper
+  from a list literal to `List.generate` to satisfy `prefer_const_constructors`
+  / `prefer_inlined_adds` without reintroducing an unmodifiable list — see
+  `AlertsProvider.loadAlerts`'s in-place `sort()`).
+
+#### Not done / decision gaps (do not invent — flagging for the user)
+
+1. **`app.dart`'s wiring (connect/disconnect hooks, `SnackBar`, navigation)
+   has no automated test**, matching this file's pre-existing convention —
+   flagging since it's the one piece of T3 that isn't TDD-covered.
+2. **"Connect on app start with a stored session" is a no-op today**:
+   `AuthBloc._onSessionChecked` (T1) always emits `AuthUnauthenticated`
+   regardless of a stored token ("Full token renewal goes in a later
+   iteration" per its own comment) — a pre-existing limitation, not
+   something T3 changes. `RealtimeService.connect()` is still called
+   unconditionally in `app.dart`'s `initState` so the hook is correct and
+   ready for whenever session restore is implemented; it just never finds
+   a session to use yet in the current app.
+3. **The reconnect-retry trigger doesn't distinguish an auth-error
+   disconnect from a plain network drop** — both call the same
+   single-retry path. The Dart `socket_io_client` client doesn't expose a
+   documented, reliable way to tell them apart (the NestJS gateway disables
+   an unauthenticated socket, but from the client's perspective this can
+   surface as either `connect_error` or `disconnect`). Treating every
+   disconnect uniformly (one bounded retry) satisfies the literal
+   requirement ("try reconnecting once ... don't loop") without relying on
+   an unreliable reason string; flagging in case the user wants a stricter
+   auth-only retry policy validated against a real disabled-account run.
+4. **Not manually verified against a live server** (no integration/E2E
+   test in this task's scope, and none existed for T1/T2's REST flows
+   either) — `RealtimeServiceImpl` is fully unit-tested against a mocked
+   `SocketConnection`, but the real `IoSocketConnection` adapter (like
+   T2's `NativeDeviceContactPicker`) was not exercised against the actual
+   `saeta-backend-v2` Socket.IO gateway.
+
+### T4 — Reset "send SMS on alert" preference on logout (done)
+
+TDD: strict, source: user global config, runner: `flutter test`. RED
+observed first (the new `clearSession` preference-reset test failed against
+the pre-T4 implementation — `flutterSecureStorage.write` for
+`keySendSmsOnAlert` was never called), then implemented to GREEN.
+
+Implementation: a single change in `SecureStorage.clearSession()`
+(`lib/core/storage/secure_storage.dart`) — added `setSendSmsOnAlert(false)`
+to the `Future.wait([...])` alongside the existing key deletions. This is
+the one choke point all three end-of-session paths already go through:
+manual logout (`MainNavigationProvider.logout()`), `AuthInterceptor`'s
+session-expired handling (T1), and T3's `RealtimeServiceImpl` `disableUser`
+handling — so the single edit covers all three without touching any of
+those three call sites.
+
+Tests added (`test/core/storage/secure_storage_test.dart`, new
+`clearSession` group): a regression-lock test that the four existing keys
+are still deleted, plus the new test asserting `keySendSmsOnAlert` is
+written as `'false'`.
+
+Commands run (foreground): covered by T3's combined `flutter test`
+(**78/78 passed**) and `flutter analyze` (**No issues found!**) runs above,
+since both tasks were verified together before splitting into separate
+commits.
+
+Not done / decision gaps: none for T4 — the acceptance criterion ("reset on
+manual logout, session expiry, and `disableUser`") is satisfied structurally
+by all three paths sharing `clearSession()`, which is asserted directly by
+the new test and by T1/T3's own tests confirming each path still calls
+`clearSession()`.

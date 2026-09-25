@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../auth/domain/entities/user_entity.dart';
 
 class MainNavigationProvider extends ChangeNotifier {
   MainNavigationProvider({
     required SecureStorage storage,
+    required RealtimeService realtimeService,
     UserEntity? initialUser,
   })  : _storage = storage,
+        _realtimeService = realtimeService,
         _currentUser = initialUser;
 
   final SecureStorage _storage;
+  final RealtimeService _realtimeService;
 
   int _currentIndex = 0;
   UserEntity? _currentUser;
@@ -35,6 +39,7 @@ class MainNavigationProvider extends ChangeNotifier {
     notifyListeners();
 
     await _storage.clearSession();
+    await _realtimeService.disconnect();
 
     _isLoggingOut = false;
     _currentUser = null;

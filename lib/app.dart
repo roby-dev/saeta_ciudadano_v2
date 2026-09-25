@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'core/constants/app_constants.dart';
+import 'core/network/account_disabled_notifier.dart';
 import 'core/network/session_expired_notifier.dart';
+import 'core/realtime/realtime_service.dart';
 import 'features/auth/domain/entities/user_entity.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
+import 'features/auth/presentation/bloc/auth_state.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/splash_page.dart';
 import 'features/main/presentation/pages/main_page.dart';
@@ -49,7 +52,11 @@ class SaetaCiudadanoApp extends StatefulWidget {
 }
 
 class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp> {
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+
   StreamSubscription<void>? _sessionExpiredSubscription;
+  StreamSubscription<String>? _accountDisabledSubscription;
 
   @override
   void initState() {
@@ -59,13 +66,29 @@ class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp> {
     // session, this just takes the user back to the login screen.
     _sessionExpiredSubscription =
         sl<SessionExpiredNotifier>().stream.listen((_) {
+      sl<RealtimeService>().disconnect();
       _router.go(AppConstants.routeLogin);
     });
+    // `disableUser`: the realtime service already cleared the session and
+    // disconnected the socket (see RealtimeServiceImpl); this just navigates
+    // back to login and surfaces the server-provided message.
+    _accountDisabledSubscription =
+        sl<AccountDisabledNotifier>().stream.listen((message) {
+      _router.go(AppConstants.routeLogin);
+      _messengerKey.currentState
+          ?.showSnackBar(SnackBar(content: Text(message)));
+    });
+    // Covers "connect on app start with a stored session"; a no-op today
+    // since there is no token yet without a prior login in this app
+    // instance (AuthSessionChecked doesn't restore a session automatically —
+    // a pre-existing limitation from T1, not something T3 changes).
+    sl<RealtimeService>().connect();
   }
 
   @override
   void dispose() {
     _sessionExpiredSubscription?.cancel();
+    _accountDisabledSubscription?.cancel();
     super.dispose();
   }
 
@@ -77,16 +100,24 @@ class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp> {
           create: (_) => sl<AuthBloc>(),
         ),
       ],
-      child: MaterialApp.router(
-        title: 'Saeta Ciudadano',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF1565C0),
+      child: BlocListener<AuthBloc, AuthState>(
+        listener: (context, state) {
+          if (state is AuthAuthenticated) {
+            sl<RealtimeService>().connect();
+          }
+        },
+        child: MaterialApp.router(
+          title: 'Saeta Ciudadano',
+          debugShowCheckedModeBanner: false,
+          scaffoldMessengerKey: _messengerKey,
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF1565C0),
+            ),
+            useMaterial3: true,
           ),
-          useMaterial3: true,
+          routerConfig: _router,
         ),
-        routerConfig: _router,
       ),
     );
   }
