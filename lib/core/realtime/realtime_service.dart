@@ -22,6 +22,14 @@ abstract class RealtimeService {
   Future<void> connect();
 
   /// Disconnects the socket. Must be called on logout and on session
-  /// expiry so a stale connection doesn't linger.
+  /// expiry so a stale connection doesn't linger. Cancels any pending
+  /// backoff retry and never schedules another one afterwards.
   Future<void> disconnect();
+
+  /// Called when the app returns to the foreground
+  /// (`AppLifecycleState.resumed`). If the socket is down and the app
+  /// hasn't explicitly disconnected, reconnects immediately (resetting the
+  /// backoff) instead of waiting out the remaining delay. A no-op
+  /// otherwise (already connected, or explicitly disconnected).
+  Future<void> reconnectOnResume();
 }

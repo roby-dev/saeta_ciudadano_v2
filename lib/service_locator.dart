@@ -5,6 +5,7 @@ import 'core/network/account_disabled_notifier.dart';
 import 'core/network/auth_interceptor.dart';
 import 'core/network/http_client.dart';
 import 'core/network/session_expired_notifier.dart';
+import 'core/network/token_refresher.dart';
 import 'core/realtime/io_socket_connection.dart';
 import 'core/realtime/realtime_service.dart';
 import 'core/realtime/realtime_service_impl.dart';
@@ -67,6 +68,19 @@ Future<void> setupServiceLocator() async {
   sl.registerLazySingleton<AccountDisabledNotifier>(
     () => AccountDisabledNotifier(),
   );
+  sl.registerLazySingleton<Dio>(
+    () => HttpClient.create(),
+    instanceName: authDioInstanceName,
+  );
+  // Shared single-flight refresh, used by both AuthInterceptor (401 retries
+  // on REST calls) and RealtimeService (auth-rejected socket reconnects).
+  sl.registerLazySingleton<TokenRefresher>(
+    () => TokenRefresher(
+      authDio: sl<Dio>(instanceName: authDioInstanceName),
+      storage: sl<SecureStorage>(),
+      sessionExpiredNotifier: sl<SessionExpiredNotifier>(),
+    ),
+  );
   sl.registerLazySingleton<SocketConnection>(
     () => IoSocketConnection(),
   );
@@ -75,20 +89,17 @@ Future<void> setupServiceLocator() async {
       socket: sl<SocketConnection>(),
       storage: sl<SecureStorage>(),
       accountDisabledNotifier: sl<AccountDisabledNotifier>(),
+      tokenRefresher: sl<TokenRefresher>(),
     ),
-  );
-  sl.registerLazySingleton<Dio>(
-    () => HttpClient.create(),
-    instanceName: authDioInstanceName,
   );
   sl.registerLazySingleton<Dio>(() {
     final dio = HttpClient.create();
     dio.interceptors.add(
       AuthInterceptor(
         dioProvider: () => sl<Dio>(),
-        authDio: sl<Dio>(instanceName: authDioInstanceName),
         storage: sl<SecureStorage>(),
         sessionExpiredNotifier: sl<SessionExpiredNotifier>(),
+        tokenRefresher: sl<TokenRefresher>(),
       ),
     );
     return dio;

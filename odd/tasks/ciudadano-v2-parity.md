@@ -27,6 +27,8 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
 - [x] T2 — Emergency contacts + SMS on alert. Decision: open the device SMS composer (url_launcher `sms:`), no SEND_SMS permission. Also narrowed AuthInterceptor public paths: only `POST /v1/users` and `GET /v1/users/dni/:dni` are public; `PATCH`/`GET /v1/users/:id` need the Bearer header (route: delegated direct — new `emergency_contacts` feature across data/domain/presentation, `AuthInterceptor` fix, `SecureStorage`, `service_locator`, profile/emergency UI hooks + tests).
 - [x] T3 — Socket.IO client: `updatedAlert` live-updates `AlertsProvider`, `disableUser` clears the session and signals the app (route: delegated direct — new `core/realtime` (interface + socket_io_client adapter + service impl), `core/network/account_disabled_notifier.dart`, `service_locator`, `app.dart`, `AlertsProvider`, `MainNavigationProvider`, `main_page.dart` wiring + tests).
 - [x] T4 — Reset the local "send SMS on alert" preference on every end-of-session path (manual logout, session expiry, `disableUser`) (route: delegated direct, bundled with T3 since it depends on T3's `disableUser` handling — one-line change in `SecureStorage.clearSession()` + tests).
+- [x] T5 — Socket reconnection with exponential backoff + auth-refresh-once, replacing T3's "exactly one retry then dead until restart" policy (route: delegated direct — `core/realtime/realtime_service_impl.dart` + `realtime_service.dart` interface, new `core/network/token_refresher.dart` extracted from `AuthInterceptor`, `AuthInterceptor` refactor to use it, `service_locator`, `app.dart` (foreground-resume hook), `pubspec.yaml` (`fake_async` dev dep) + tests).
+- [x] T6 — Auto-login on app start via `GET /v1/auth/me` (route: delegated direct — `AuthBloc._onSessionChecked`, new `GetCurrentUserUseCase` + `AuthRepository.getCurrentUser` + `AuthRemoteDataSource.getCurrentUser`, `service_locator` + tests).
 
 ## Acceptance criteria
 - T1: a 401 on an authenticated request triggers exactly one refresh (concurrent 401s share it), tokens are persisted, the original request is retried once; a failed refresh clears the session and returns the user to login. Refresh endpoint itself never loops.
@@ -72,6 +74,36 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
   path, and `RealtimeServiceImpl`'s `disableUser` handling all call
   `clearSession()`, this single change resets the preference on all three
   end-of-session paths.
+- T5: network-type socket failures (`connect_error`, or `onDisconnect` with
+  any reason other than `'io server disconnect'` — covers `transport
+  close`/`ping timeout`) retry with unlimited exponential backoff + jitter
+  (1s, 2s, 4s, 8s, 16s, capped 30s), reset to the first step after any
+  successful connect. Every attempt re-reads the access token from
+  `SecureStorage` (via the existing `connect()`, which already does this).
+  An `onDisconnect('io server disconnect')` that isn't the `disableUser`
+  path (server-initiated, e.g. an expired/invalid token rejected at
+  `handleConnection`) attempts exactly one token refresh via the new shared
+  `TokenRefresher`, then one reconnect with the new token; a second
+  consecutive `'io server disconnect'` after that stops retrying entirely
+  (no loop), and a failed refresh is already handled by
+  `TokenRefresher`'s own session-expired path. `disconnect()` (manual
+  logout, session expiry) and the `disableUser` handler both cancel any
+  pending backoff timer and never schedule a retry. Coming back to the
+  foreground (`AppLifecycleState.resumed`) triggers an immediate reconnect
+  (backoff reset) when the socket isn't already connected and the app
+  hasn't explicitly disconnected.
+- T6: on splash, a stored session (rememberMe on + token + userId present)
+  is validated via `GET /v1/auth/me` through the app's normal `Dio` (so
+  `AuthInterceptor` transparently refreshes an expired access token before
+  this call ever reaches `AuthBloc`). Success emits `AuthAuthenticated`
+  (same state login uses), which both navigates to `routeMain` (existing
+  `SplashPage` listener) and connects the realtime service (existing
+  app-level `BlocListener` on `AuthAuthenticated`, unchanged from T3).
+  `UnauthorizedFailure` (session unrecoverable) clears the session and
+  emits `AuthUnauthenticated` (→ login). Any other failure (network error,
+  server error) emits `AuthUnauthenticated` (→ login) **without** touching
+  the stored session, so the next app launch can retry the same session —
+  see the decision gap below.
 
 ## Decisions (T3)
 - **`updatedAlert` payload handling**: the backend's `emitAlertUpdated`
@@ -610,3 +642,182 @@ manual logout, session expiry, and `disableUser`") is satisfied structurally
 by all three paths sharing `clearSession()`, which is asserted directly by
 the new test and by T1/T3's own tests confirming each path still calls
 `clearSession()`.
+
+### T5 — Socket reconnection with backoff (done)
+
+Route: delegated direct (touches `core/realtime/realtime_service_impl.dart`
++ `realtime_service.dart`, a new `core/network/token_refresher.dart`
+extracted from `AuthInterceptor`, `AuthInterceptor` itself, `service_locator`,
+`app.dart`, `pubspec.yaml` + tests). Executed directly by the writer agent
+per explicit instruction not to spawn subagents this session; documented as
+"delegated direct" only to match this feature doc's existing task-routing
+convention from T1–T4.
+
+TDD: strict, source: user global config, runner: `flutter test`. Every unit
+was written test-first: RED observed (new/changed constructor signatures —
+`TokenRefresher` didn't exist, `RealtimeServiceImpl` didn't accept
+`tokenRefresher`/`jitterMillis`, `RealtimeService.reconnectOnResume` was
+unimplemented — all compile errors), then implemented to GREEN. Suite grew
+from 78 tests (T3/T4 baseline) to **94 tests, all passing** (4 new
+`TokenRefresher`, 23 rewritten/expanded `RealtimeServiceImpl` — up from 11 —
+`AuthInterceptor`'s existing 11 unchanged behaviorally, only their `setUp`
+adapted to the new constructor).
+
+#### Backend confirmation (read-only, `saeta-backend-v2`)
+
+Read `src/realtime/presentation/gateways/realtime.gateway.ts`
+(`handleConnection`) and the installed `socket_io_client-3.1.6` package
+source (`lib/src/socket.dart`) to confirm the exact client-visible signal
+for an auth rejection: the gateway rejects an unauthenticated/expired-token
+socket with `client.disconnect(true)`, and the Dart client's `onclose('io
+server disconnect')` (socket.dart:562) is what fires `onDisconnect` with
+that exact reason string — confirmed distinct from a client-initiated
+disconnect (`'io client disconnect'`, socket.dart:604, fired when the app's
+own `disconnect()`/`disableUser` handling calls the vendor socket's
+`disconnect()`) and from any network-type reason (`'transport close'`,
+`'ping timeout'`, etc.). This is the exact signal
+`RealtimeServiceImpl._handleAuthRejection` keys off.
+
+#### New: `lib/core/network/token_refresher.dart`
+
+`TokenRefresher` — extracted verbatim from `AuthInterceptor`'s previous
+`_performRefresh`/`_refreshTokens` (byte-for-byte identical refresh logic:
+reads the refresh token, calls `POST /v1/auth/refresh` via its own
+interceptor-free `Dio`, persists both tokens via
+`SecureStorage.updateTokens`, and on any failure clears the session +
+notifies `SessionExpiredNotifier`), plus the same in-flight-future
+single-flight guarantee. Shared by `AuthInterceptor` (401 retries) and
+`RealtimeServiceImpl` (auth-rejected socket reconnects) so both callers
+observe "exactly one refresh at a time" against the same
+`SecureStorage`/`SessionExpiredNotifier`. 4 new tests
+(`test/core/network/token_refresher_test.dart`): success persists both
+tokens; no refresh token clears session + notifies; a failed refresh call
+clears session + notifies; concurrent callers share exactly one call.
+
+#### Changed: `lib/core/network/auth_interceptor.dart`
+
+Constructor now takes `tokenRefresher: TokenRefresher` instead of
+`authDio: Dio`; `_refreshTokens()` is now a one-line delegation to
+`_tokenRefresher.refresh()`. `_performRefresh`/the old `_refreshing` field
+were deleted (moved into `TokenRefresher`). Behavior is unchanged — all 11
+existing tests in `test/core/network/auth_interceptor_test.dart` pass
+unmodified; only `setUp` changed, to build a `TokenRefresher` from the same
+`authDio`/`storage`/`notifier` it already had.
+
+#### Changed: `lib/core/realtime/realtime_service.dart` / `realtime_service_impl.dart`
+
+`RealtimeService` gained `Future<void> reconnectOnResume();`.
+`RealtimeServiceImpl`:
+- New required `tokenRefresher: TokenRefresher` constructor param, plus
+  optional `backoffForAttempt`/`jitterMillis` injection points (both
+  default; tests use the latter to zero out jitter for exact-value
+  assertions, and one dedicated test overrides it to prove jitter is
+  actually added).
+- `_scheduleNetworkRetry()` replaces the old single-shot `_retryOnce()`:
+  unlimited retries via `Timer`, delay = `_defaultBackoff(attempt)` (1s,
+  2s, 4s, 8s, 16s, capped 30s from `attempt` 0..5+) + injected jitter
+  (0–250ms by default via `Random`), `_retryAttempt` incremented per
+  schedule and reset to 0 on the next successful `onConnect`. Triggered by
+  `onConnectError` (always network-type) and by `onDisconnect` whenever the
+  reason isn't exactly `'io server disconnect'`.
+- `_handleAuthRejection()`: triggered only by `onDisconnect('io server
+  disconnect')` that isn't an explicit disconnect. Guarded by
+  `_authReconnectAttempted` (reset only on a real successful `onConnect`,
+  same as the backoff counter) so it fires at most once per failure streak:
+  calls `_tokenRefresher.refresh()` once, and on a non-null result calls
+  `connect()` once more (which re-reads the — now refreshed — token from
+  `SecureStorage`, since `TokenRefresher.refresh()` already persisted it).
+  A `null` result (refresh failed) or a second consecutive `'io server
+  disconnect'` both stop without scheduling anything further — no loop.
+- `connect()`/`disconnect()` behavior preserved (still token-gated,
+  still re-reads storage every call); `disconnect()` and the `disableUser`
+  handler (`_handleDisableUser`) both now also cancel any pending backoff
+  `Timer` via `_cancelPendingRetry()`.
+- New `reconnectOnResume()`: no-op when already connected
+  (`_connected`) or explicitly disconnected; otherwise cancels any pending
+  timer, resets `_retryAttempt` to 0, and calls `connect()` immediately.
+- `dispose()` now also cancels any pending timer.
+- Time is driven by plain `Timer`/`Future` APIs (no bespoke clock
+  abstraction) so `package:fake_async`'s `fakeAsync()` fully controls it in
+  tests.
+
+Tests (`test/core/realtime/realtime_service_impl_test.dart`, rewritten):
+groups for `connect`/`disconnect` (adapted), a new `network-type backoff
+retry` group (first-retry timing, doubling+cap sequence across 7
+consecutive failures, reset-after-success, jitter present, token re-read
+per retry, unlimited retries — 10 consecutive failures all retried), a new
+`auth-rejected disconnect (io server disconnect)` group (refresh-once +
+reconnect-once; stops after a second consecutive rejection; a failed
+refresh stops without a second attempt; the guard resets after a later real
+connect), `explicit disconnect never retries` (manual disconnect,
+`disableUser`, and a dedicated "cancels a pending timer" test for each),
+and a new `reconnectOnResume` group (reconnects immediately + resets
+backoff when down; no-op when connected; no-op when explicitly
+disconnected). `updatedAlert`/`disableUser` payload-handling tests
+unchanged from T3.
+
+One test-infrastructure note: repeated `verify(() => socket.connect())
+.called(n)` checkpoints within a single test don't behave like
+independent cumulative assertions in mocktail — once a set of matching
+invocations has been claimed by one `verify()`, a later `verify()` on the
+same expression only sees calls made *since* that checkpoint. Discovered
+via RED failures when porting the old single-checkpoint-per-test T3 style
+to these multi-stage backoff tests; fixed by tracking `socket.connect()`
+call counts with a plain incrementing counter (via `when(...).thenAnswer`)
+instead of multiple `verify().called()` checkpoints on the same mock call
+within one test.
+
+#### Changed: `lib/service_locator.dart`
+
+Registers `TokenRefresher` (needs `authDio`, `storage`,
+`sessionExpiredNotifier`, all already registered) as a lazy singleton;
+`RealtimeService`'s registration gained `tokenRefresher: sl<TokenRefresher>()`;
+`AuthInterceptor`'s registration now passes `tokenRefresher:
+sl<TokenRefresher>()` instead of `authDio: sl<Dio>(instanceName:
+authDioInstanceName)` directly (the `authDio` singleton itself is
+unchanged, just no longer referenced from two places).
+
+#### Changed: `lib/app.dart`
+
+`_SaetaCiudadanoAppState` now mixes in `WidgetsBindingObserver`
+(registered/removed in `initState`/`dispose`) and implements
+`didChangeAppLifecycleState`: on `AppLifecycleState.resumed`, calls
+`sl<RealtimeService>().reconnectOnResume()` (wrapped in `unawaited`, same
+convention as this file's existing fire-and-forget `connect()` calls). Not
+covered by an automated test — consistent with this file's existing
+untested stream-to-navigation/lifecycle glue (same convention flagged for
+`SessionExpiredNotifier`/`AccountDisabledNotifier` wiring in T1/T3).
+
+#### Dependencies added (`pubspec.yaml`)
+
+- `fake_async: ^1.3.1` (dev only) — was already present transitively (via
+  `flutter_test`); added as a direct dev dependency since the T5 tests
+  import `package:fake_async/fake_async.dart` directly and relying on an
+  undeclared transitive dependency is fragile.
+
+#### Commands run (foreground)
+
+- `flutter pub get`: success, `fake_async` resolved as a direct dev
+  dependency; no errors.
+- `flutter test`: **94/94 passed, 0 failed** (78 T1–T4 baseline − 11 old
+  `RealtimeServiceImpl` tests + 23 new/rewritten `RealtimeServiceImpl` + 4
+  new `TokenRefresher`, `AuthInterceptor`'s 11 unchanged).
+- `flutter analyze`: **No issues found!**
+
+#### Not done / decision gaps (do not invent — flagging for the user)
+
+1. **Not manually verified against a live server** (no integration/E2E
+   test, consistent with T1–T4) — the auth-rejection path's exact
+   `'io server disconnect'` reason string was confirmed by reading the
+   vendor client's source (see "Backend confirmation" above), not by
+   observing a real disabled/expired-token connection attempt against the
+   deployed backend.
+2. **Foreground-resume wiring in `app.dart` has no automated test**, same
+   convention as T1/T3's other untested `app.dart` stream/lifecycle glue.
+3. **Jitter bound (0–250ms) and the backoff cap (30s) are hardcoded**
+   constants (`_jitterCapMs`, `_backoffCapMs`), not configurable — the task
+   only specified example values ("e.g. 1s, 2s, 4s ... capped at 30s"), so
+   these were picked as reasonable literal defaults; flagging in case the
+   user wants them tuned or exposed as constructor parameters.
+
+### T6 — Auto-login on app start

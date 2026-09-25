@@ -51,7 +51,8 @@ class SaetaCiudadanoApp extends StatefulWidget {
   State<SaetaCiudadanoApp> createState() => _SaetaCiudadanoAppState();
 }
 
-class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp> {
+class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp>
+    with WidgetsBindingObserver {
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
 
@@ -61,6 +62,7 @@ class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Reuses the same navigation target as the manual logout flow
     // (profile_view.dart): the interceptor already cleared the stored
     // session, this just takes the user back to the login screen.
@@ -87,9 +89,20 @@ class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sessionExpiredSubscription?.cancel();
     _accountDisabledSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Reconnect immediately (backoff reset) when the app comes back to the
+    // foreground; a no-op when already connected or explicitly
+    // disconnected (see RealtimeServiceImpl.reconnectOnResume).
+    if (state == AppLifecycleState.resumed) {
+      unawaited(sl<RealtimeService>().reconnectOnResume());
+    }
   }
 
   @override

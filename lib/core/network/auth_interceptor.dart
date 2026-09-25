@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import '../storage/secure_storage.dart';
 import 'session_expired_notifier.dart';
+import 'token_refresher.dart';
 
 /// Attaches the stored access token to every authenticated request and
 /// transparently refreshes it on a 401 response.
@@ -14,32 +15,29 @@ import 'session_expired_notifier.dart';
 /// alone is not enough to tell them apart from the public ones, so the HTTP
 /// method matters too.
 ///
-/// The retry uses a request made through [_authDio], a separate [Dio]
-/// instance with no interceptors, so the refresh call itself can never
-/// trigger this interceptor again (no loops). The retried original request
-/// goes back through [_dioProvider]'s Dio instance so it keeps the app's
-/// normal interceptor chain (e.g. logging).
+/// The actual refresh call is delegated to [TokenRefresher] (shared with
+/// `RealtimeServiceImpl`'s auth-rejected socket reconnect path), which uses
+/// its own interceptor-free [Dio] so a refresh call can never trigger this
+/// interceptor again (no loops). The retried original request goes back
+/// through [_dioProvider]'s Dio instance so it keeps the app's normal
+/// interceptor chain (e.g. logging).
 class AuthInterceptor extends Interceptor {
   AuthInterceptor({
     required Dio Function() dioProvider,
-    required Dio authDio,
     required SecureStorage storage,
     required SessionExpiredNotifier sessionExpiredNotifier,
+    required TokenRefresher tokenRefresher,
   })  : _dioProvider = dioProvider,
-        _authDio = authDio,
         _storage = storage,
-        _sessionExpiredNotifier = sessionExpiredNotifier;
+        _sessionExpiredNotifier = sessionExpiredNotifier,
+        _tokenRefresher = tokenRefresher;
 
   static const String retriedExtraKey = 'auth_interceptor_retried';
 
   final Dio Function() _dioProvider;
-  final Dio _authDio;
   final SecureStorage _storage;
   final SessionExpiredNotifier _sessionExpiredNotifier;
-
-  /// Shared in-flight refresh, so concurrent 401s trigger exactly one call
-  /// to the refresh endpoint instead of one each.
-  Future<String?>? _refreshing;
+  final TokenRefresher _tokenRefresher;
 
   /// Exactly the public (session-less) endpoints. The method matters: e.g.
   /// `POST /v1/users` (register) is public, but `GET`/`PATCH /v1/users/:id`
@@ -112,51 +110,7 @@ class AuthInterceptor extends Interceptor {
     }
   }
 
-  Future<String?> _refreshTokens() {
-    final inFlight = _refreshing;
-    if (inFlight != null) {
-      return inFlight;
-    }
-    final future = _performRefresh();
-    _refreshing = future;
-    future.whenComplete(() => _refreshing = null);
-    return future;
-  }
-
-  Future<String?> _performRefresh() async {
-    final refreshToken = await _storage.getRefreshToken();
-    if (refreshToken == null || refreshToken.isEmpty) {
-      await _handleSessionExpired();
-      return null;
-    }
-
-    try {
-      final response = await _authDio.post<Map<String, dynamic>>(
-        '/v1/auth/refresh',
-        data: {'refreshToken': refreshToken},
-      );
-      final data = response.data ?? <String, dynamic>{};
-      final newAccessToken = data['accessToken'] as String?;
-      final newRefreshToken = data['refreshToken'] as String?;
-
-      if (newAccessToken == null || newAccessToken.isEmpty) {
-        await _handleSessionExpired();
-        return null;
-      }
-
-      await _storage.updateTokens(
-        token: newAccessToken,
-        refreshToken:
-            (newRefreshToken != null && newRefreshToken.isNotEmpty)
-                ? newRefreshToken
-                : refreshToken,
-      );
-      return newAccessToken;
-    } on DioException {
-      await _handleSessionExpired();
-      return null;
-    }
-  }
+  Future<String?> _refreshTokens() => _tokenRefresher.refresh();
 
   Future<void> _handleSessionExpired() async {
     await _storage.clearSession();

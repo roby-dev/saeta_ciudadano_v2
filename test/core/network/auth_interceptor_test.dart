@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:saeta_ciudadano_v2/core/network/auth_interceptor.dart';
 import 'package:saeta_ciudadano_v2/core/network/session_expired_notifier.dart';
+import 'package:saeta_ciudadano_v2/core/network/token_refresher.dart';
 import 'package:saeta_ciudadano_v2/core/storage/secure_storage.dart';
 
 import 'fake_http_client_adapter.dart';
@@ -27,9 +28,13 @@ void main() {
     dio.interceptors.add(
       AuthInterceptor(
         dioProvider: () => dio,
-        authDio: authDio,
         storage: storage,
         sessionExpiredNotifier: notifier,
+        tokenRefresher: TokenRefresher(
+          authDio: authDio,
+          storage: storage,
+          sessionExpiredNotifier: notifier,
+        ),
       ),
     );
   });
