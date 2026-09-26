@@ -7,6 +7,7 @@ import 'core/constants/app_constants.dart';
 import 'core/network/account_disabled_notifier.dart';
 import 'core/network/session_expired_notifier.dart';
 import 'core/realtime/realtime_service.dart';
+import 'core/theme/app_theme.dart';
 import 'features/auth/domain/entities/user_entity.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
 import 'features/auth/presentation/bloc/auth_state.dart';
@@ -123,12 +124,7 @@ class _SaetaCiudadanoAppState extends State<SaetaCiudadanoApp>
           title: 'Saeta Ciudadano',
           debugShowCheckedModeBanner: false,
           scaffoldMessengerKey: _messengerKey,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFF1565C0),
-            ),
-            useMaterial3: true,
-          ),
+          theme: AppTheme.light,
           routerConfig: _router,
         ),
       ),
