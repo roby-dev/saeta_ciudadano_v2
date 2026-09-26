@@ -62,4 +62,27 @@ class AuthRepositoryImpl implements AuthRepository {
       return const Left(UnknownFailure());
     }
   }
+
+  @override
+  Future<Either<Failure, UserEntity>> getCurrentUser() async {
+    try {
+      final user = await _dataSource.getCurrentUser();
+      return Right(user.toEntity());
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout) {
+        return const Left(NetworkFailure());
+      }
+      if (e.response?.statusCode == 401) {
+        final message =
+            (e.response?.data as Map<String, dynamic>?)?['message']
+                as String? ??
+            'Session expired';
+        return Left(UnauthorizedFailure(message));
+      }
+      return Left(ServerFailure(e.response?.statusMessage ?? 'Server error'));
+    } catch (_) {
+      return const Left(UnknownFailure());
+    }
+  }
 }

@@ -5,6 +5,7 @@ import 'core/network/account_disabled_notifier.dart';
 import 'core/network/auth_interceptor.dart';
 import 'core/network/http_client.dart';
 import 'core/network/session_expired_notifier.dart';
+import 'core/network/token_refresher.dart';
 import 'core/realtime/io_socket_connection.dart';
 import 'core/realtime/realtime_service.dart';
 import 'core/realtime/realtime_service_impl.dart';
@@ -19,6 +20,7 @@ import 'features/alerts/presentation/providers/alerts_provider.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
 import 'features/auth/domain/repositories/auth_repository.dart';
+import 'features/auth/domain/usecases/get_current_user_usecase.dart';
 import 'features/auth/domain/usecases/login_usecase.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
 import 'features/emergency/data/datasources/emergency_remote_datasource.dart';
@@ -39,6 +41,14 @@ import 'features/emergency_contacts/domain/services/url_launcher_sms_launcher.da
 import 'features/emergency_contacts/domain/usecases/get_emergency_contacts_usecase.dart';
 import 'features/emergency_contacts/domain/usecases/save_emergency_contacts_usecase.dart';
 import 'features/emergency_contacts/presentation/providers/emergency_contacts_provider.dart';
+import 'features/profile/data/datasources/profile_remote_datasource.dart';
+import 'features/profile/data/repositories/profile_repository_impl.dart';
+import 'features/profile/data/services/image_picker_avatar_picker.dart';
+import 'features/profile/domain/repositories/profile_repository.dart';
+import 'features/profile/domain/services/avatar_file_validator.dart';
+import 'features/profile/domain/services/avatar_image_picker.dart';
+import 'features/profile/domain/usecases/update_profile_usecase.dart';
+import 'features/profile/domain/usecases/upload_avatar_usecase.dart';
 import 'features/register/data/datasources/register_remote_datasource.dart';
 import 'features/register/data/repositories/register_repository_impl.dart';
 import 'features/register/domain/repositories/register_repository.dart';
@@ -67,6 +77,19 @@ Future<void> setupServiceLocator() async {
   sl.registerLazySingleton<AccountDisabledNotifier>(
     () => AccountDisabledNotifier(),
   );
+  sl.registerLazySingleton<Dio>(
+    () => HttpClient.create(),
+    instanceName: authDioInstanceName,
+  );
+  // Shared single-flight refresh, used by both AuthInterceptor (401 retries
+  // on REST calls) and RealtimeService (auth-rejected socket reconnects).
+  sl.registerLazySingleton<TokenRefresher>(
+    () => TokenRefresher(
+      authDio: sl<Dio>(instanceName: authDioInstanceName),
+      storage: sl<SecureStorage>(),
+      sessionExpiredNotifier: sl<SessionExpiredNotifier>(),
+    ),
+  );
   sl.registerLazySingleton<SocketConnection>(
     () => IoSocketConnection(),
   );
@@ -75,20 +98,17 @@ Future<void> setupServiceLocator() async {
       socket: sl<SocketConnection>(),
       storage: sl<SecureStorage>(),
       accountDisabledNotifier: sl<AccountDisabledNotifier>(),
+      tokenRefresher: sl<TokenRefresher>(),
     ),
-  );
-  sl.registerLazySingleton<Dio>(
-    () => HttpClient.create(),
-    instanceName: authDioInstanceName,
   );
   sl.registerLazySingleton<Dio>(() {
     final dio = HttpClient.create();
     dio.interceptors.add(
       AuthInterceptor(
         dioProvider: () => sl<Dio>(),
-        authDio: sl<Dio>(instanceName: authDioInstanceName),
         storage: sl<SecureStorage>(),
         sessionExpiredNotifier: sl<SessionExpiredNotifier>(),
+        tokenRefresher: sl<TokenRefresher>(),
       ),
     );
     return dio;
@@ -106,11 +126,15 @@ Future<void> setupServiceLocator() async {
   sl.registerLazySingleton<LoginUseCase>(
     () => LoginUseCase(sl<AuthRepository>()),
   );
+  sl.registerLazySingleton<GetCurrentUserUseCase>(
+    () => GetCurrentUserUseCase(sl<AuthRepository>()),
+  );
 
   // Auth — presentation
   sl.registerFactory<AuthBloc>(
     () => AuthBloc(
       loginUseCase: sl<LoginUseCase>(),
+      getCurrentUserUseCase: sl<GetCurrentUserUseCase>(),
       storage: sl<SecureStorage>(),
     ),
   );
@@ -228,6 +252,35 @@ Future<void> setupServiceLocator() async {
       smsLauncher: sl<SmsLauncher>(),
       phoneNormalizer: sl<PeruvianPhoneNormalizer>(),
       messageBuilder: sl<SmsMessageBuilder>(),
+      realtimeService: sl<RealtimeService>(),
     ),
   );
+
+  // Profile — data
+  sl.registerLazySingleton<ProfileRemoteDataSource>(
+    () => ProfileRemoteDataSourceImpl(dio: sl<Dio>()),
+  );
+  sl.registerLazySingleton<ProfileRepository>(
+    () => ProfileRepositoryImpl(sl<ProfileRemoteDataSource>()),
+  );
+
+  // Profile — domain
+  sl.registerLazySingleton<UpdateProfileUseCase>(
+    () => UpdateProfileUseCase(sl<ProfileRepository>()),
+  );
+  sl.registerLazySingleton<UploadAvatarUseCase>(
+    () => UploadAvatarUseCase(sl<ProfileRepository>()),
+  );
+  sl.registerLazySingleton<AvatarImagePicker>(
+    () => ImagePickerAvatarPicker(),
+  );
+  sl.registerLazySingleton<AvatarFileValidator>(
+    () => const AvatarFileValidator(),
+  );
+  // ProfileEditProvider/AvatarUploadProvider themselves are constructed
+  // directly at their usage site (ProfileEditPage / AvatarSection) — both
+  // need runtime-only constructor args (currentUser/userId + an onUpdated
+  // callback into MainNavigationProvider), same convention as
+  // MainNavigationProvider being constructed directly in MainPage rather
+  // than via a get_it factory.
 }

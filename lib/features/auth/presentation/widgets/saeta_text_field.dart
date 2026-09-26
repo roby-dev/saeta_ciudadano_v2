@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 
+/// Login/register text field: a semibold 13px label rendered *above* the
+/// input (not a Material floating [InputDecoration.labelText]), a 48-tall
+/// radius-10 input (via [AppTheme]'s `inputDecorationTheme`), and an
+/// optional show/hide eye icon for password fields.
 class SaetaTextField extends StatefulWidget {
   const SaetaTextField({
     super.key,
     required this.label,
-    required this.prefixIcon,
+    this.prefixIcon,
     this.controller,
     this.keyboardType,
     this.obscureText = false,
@@ -14,11 +20,12 @@ class SaetaTextField extends StatefulWidget {
     this.validator,
     this.textInputAction,
     this.onFieldSubmitted,
+    this.onChanged,
     this.inputFormatters,
   });
 
   final String label;
-  final IconData prefixIcon;
+  final IconData? prefixIcon;
   final TextEditingController? controller;
   final TextInputType? keyboardType;
   final bool obscureText;
@@ -27,6 +34,7 @@ class SaetaTextField extends StatefulWidget {
   final String? Function(String?)? validator;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onFieldSubmitted;
+  final ValueChanged<String>? onChanged;
   final List<TextInputFormatter>? inputFormatters;
 
   @override
@@ -63,25 +71,39 @@ class _SaetaTextFieldState extends State<SaetaTextField> {
       );
     }
 
-    return TextFormField(
-      controller: widget.controller,
-      keyboardType: widget.keyboardType,
-      obscureText: _obscure,
-      readOnly: widget.readOnly,
-      textInputAction: widget.textInputAction,
-      onFieldSubmitted: widget.onFieldSubmitted,
-      validator: widget.validator,
-      inputFormatters: widget.inputFormatters,
-      decoration: InputDecoration(
-        labelText: widget.label,
-        border: const OutlineInputBorder(),
-        prefixIcon: Icon(widget.prefixIcon),
-        suffixIcon: suffix,
-        filled: widget.readOnly,
-        fillColor: widget.readOnly
-            ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : null,
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.label,
+          style: const TextStyle(
+            fontFamily: AppFonts.sans,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.heading,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: widget.controller,
+          keyboardType: widget.keyboardType,
+          obscureText: _obscure,
+          readOnly: widget.readOnly,
+          textInputAction: widget.textInputAction,
+          onFieldSubmitted: widget.onFieldSubmitted,
+          onChanged: widget.onChanged,
+          validator: widget.validator,
+          inputFormatters: widget.inputFormatters,
+          style: const TextStyle(fontFamily: AppFonts.sans, fontSize: 15),
+          decoration: InputDecoration(
+            prefixIcon:
+                widget.prefixIcon != null ? Icon(widget.prefixIcon) : null,
+            suffixIcon: suffix,
+            filled: true,
+            fillColor: widget.readOnly ? AppColors.background : null,
+          ),
+        ),
+      ],
     );
   }
 }

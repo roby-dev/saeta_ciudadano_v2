@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 
+/// The SOS circle on [EmergencyView]'s hero card: an outer 168px
+/// [AppColors.dangerTint] ring around an inner 136px [AppColors.danger]
+/// circle showing "SOS" + [label].
 class SosButton extends StatelessWidget {
   const SosButton({
     super.key,
@@ -13,39 +18,47 @@ class SosButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      height: 64,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(32),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.red.withValues(alpha: 0.35),
-            blurRadius: 16,
-            spreadRadius: 2,
-            offset: const Offset(0, 4),
-          ),
-        ],
+      width: 168,
+      height: 168,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.dangerTint,
       ),
-      child: ElevatedButton.icon(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.red.shade700,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(32),
-          ),
-          elevation: 0,
-        ),
-        icon: const Icon(
-          Icons.warning_rounded,
-          size: 32,
-        ),
-        label: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 2,
+      child: Material(
+        shape: const CircleBorder(),
+        color: AppColors.danger,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 136,
+            height: 136,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'SOS',
+                  style: TextStyle(
+                    fontFamily: AppFonts.sans,
+                    fontSize: 34,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontFamily: AppFonts.sans,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
