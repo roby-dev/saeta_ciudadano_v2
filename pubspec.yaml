@@ -36,6 +36,11 @@ dependencies:
   # Camera/gallery avatar picker (maxWidth/maxHeight/imageQuality keep
   # uploads well under the backend's 5MB /v1/uploads/:id limit)
   image_picker: ^1.2.3
+  # Alert detail map (marker at the alert's coordinates, legacy style/zoom).
+  # Android: reads the key from android/local.properties (see
+  # android/app/build.gradle.kts). iOS: reads it from ios/Flutter/Secrets.xcconfig
+  # (git-ignored; see ios/Flutter/Secrets.xcconfig.example).
+  google_maps_flutter: ^2.18.1
 
 dev_dependencies:
   flutter_test:
@@ -50,3 +55,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/map_style.json

@@ -15,7 +15,9 @@ Bring the Flutter citizen app (`saeta_ciudadano_v2`) to functional parity with t
 
 - T8/T9 (added 2026-09-25, user-authorized): profile edit and avatar upload, on stacked branch `feat/profile-edit-avatar` (from `fix/realtime-reconnect-autologin`).
 
-Out of scope: maps in alert detail, change password (tracked as later gaps).
+- T10 (added 2026-09-25, user-authorized): Google Maps in the alert detail, same branch.
+
+Out of scope: change password (tracked as a later gap).
 
 ## Constraints
 - Clean architecture per feature (data/domain/presentation), get_it DI, dartz Either.
@@ -34,6 +36,7 @@ Out of scope: maps in alert detail, change password (tracked as later gaps).
 - [x] T7 — Listen to the backend's new `updatedProfile` socket event and live-update the profile view and emergency contacts (route: delegated direct — writer trigger: `RealtimeService` interface + impl, `MainNavigationProvider`, `EmergencyContactsProvider`, `service_locator`/`main_page` wiring + tests).
 - [x] T8 — Edit own profile (name, lastname, phone, email) via `PATCH /v1/users/:id` (route: delegated direct — new `profile` feature data/domain/presentation, edit form UI, `service_locator` + tests).
 - [x] T9 — Avatar upload from camera or gallery via `PUT /v1/uploads/:id` and display via `GET /v1/uploads/:photo` (route: delegated direct — `image_picker` dependency, platform permissions, profile feature extension, UI + tests).
+- [x] T10 — Google Maps in alert detail: marker at the alert's coordinates, colored by state, legacy map style (route: delegated direct — `google_maps_flutter` dependency, Android/iOS key wiring, `alert_detail_sheet.dart`, map helpers + tests).
 
 ## Acceptance criteria
 - T1: a 401 on an authenticated request triggers exactly one refresh (concurrent 401s share it), tokens are persisted, the original request is retried once; a failed refresh clears the session and returns the user to login. Refresh endpoint itself never loops.
@@ -139,6 +142,16 @@ Out of scope: maps in alert detail, change password (tracked as later gaps).
   The avatar renders from `GET /v1/uploads/:photo` using the user's `image`
   file id, with a placeholder when empty or on load error. Upload failure
   never loses the current avatar.
+
+- T10: the alert detail shows a non-interactive-by-default Google Map
+  centered on the alert's latitude/longitude (legacy zoom level), with one
+  marker whose hue depends on the alert state (legacy parity, see
+  `saeta-ciudadano` `AlertDetailFragment.markPoiOnMap`) and the legacy map
+  style JSON. Missing/invalid coordinates show a placeholder instead of a
+  map. The Maps key is never committed: Android reads `MAPS_API_KEY` from
+  git-ignored `android/local.properties` via `manifestPlaceholders`; iOS
+  reads it from a git-ignored xcconfig. A missing key must not break the
+  build.
 
 ## Decisions (T3)
 - **`updatedAlert` payload handling**: the backend's `emitAlertUpdated`
@@ -1524,3 +1537,128 @@ isn't — see the "wiring decision" carried over from T8.
    but this client never produces that literal itself, so it's an
    unexercised edge case rather than a defect against the stated acceptance
    criterion ("placeholder when empty or on load error").
+
+### T10 — Alert detail map (done)
+
+Resumed and finished after the 2026-09-26 pause. Route: delegated direct per
+the parent's routing (writer trigger: iOS platform files + `Info.plist` +
+`alert_detail_sheet.dart` + a new test — 2+ non-trivial files).
+
+#### Sanity check of the paused-session helpers (no defects found)
+
+Verified all four helpers in `lib/features/alerts/presentation/map/` and
+their tests against legacy parity by reading
+`saeta-ciudadano/app/src/main/java/com/kazuro/saetaciudadano/Controller/Fragment/alerts/AlertDetailFragment.java`
+(`markPoiOnMap`) and `App/Config.java` directly:
+- `alert_marker_hue.dart`: the four hardcoded hues match the exact
+  hex-to-HSV conversion of the legacy `strings.xml` colors (`textColorState*`:
+  `#17E76A`/`#0029FF`/`#FF9900`/`#FF0000` — confirmed byte-for-byte against
+  `strings.xml`), and the "unknown state -> hue 0" fallback correctly mirrors
+  the legacy Java `switch` having no `default` branch (leaves `color[3]` at
+  its zero-initialized value). No change needed.
+- `alert_map_card.dart`'s `_legacyMapZoom = 16` matches `Config.MAP_ZOM = 16`
+  exactly. No change needed.
+- `alert_map_coordinates.dart`: correctly treats exact `(0, 0)` as the
+  missing-coordinate sentinel (matches `CitizenAlertModel.fromJson`'s
+  default) while still allowing a single axis to legitimately sit at 0; NaN
+  and out-of-range lat/lng also rejected. No change needed.
+- `alert_maps_url_builder.dart` / `map_style_asset.dart`: straightforward,
+  already correct.
+- Conclusion: **no defects found in the four helpers or their existing 4
+  test files** — nothing was changed here beyond this review.
+
+#### Wiring into `alert_detail_sheet.dart`
+
+Inserted `AlertMapCard` right after the existing "Ubicación GPS"
+`_buildDetailTile` (which keeps the raw lat/lng text for accessibility) and
+before the "Personal que Atendió" tile, passing `alert.latitude`,
+`alert.longitude`, `alert.stateName`, `alert.typeName` directly —
+`CitizenAlertEntity.latitude`/`longitude` are non-null `double`s (`required`
+in the entity), so no null-handling is needed at the call site; the
+(0,0)-sentinel / out-of-range cases are already handled inside
+`alertMapCoordinates`, which `AlertMapCard` calls internally to decide
+placeholder vs. map.
+
+#### New widget test
+
+`test/features/alerts/presentation/widgets/alert_map_card_test.dart` (2
+tests) — covers the placeholder path only (zero coordinates, and an
+out-of-range latitude), asserting the `'Ubicación no disponible'` text, the
+placeholder icon, and the *absence* of the "Abrir en Google Maps" button.
+Deliberately does not attempt to pump a real `GoogleMap` (its platform view
+has no test-harness registration in this project and would fail/hang in
+`flutter test`) — consistent with the task's instruction to "test what's
+testable."
+
+**TDD honesty note (RED/GREEN):** genuine RED was not observed for this
+test. `AlertMapCard`'s placeholder branch was already fully implemented
+before this session (partial writer output from the paused 2026-09-25
+session), so running the new test against the existing implementation
+passed immediately on the first run. This is reported honestly per the
+task's own instruction rather than inventing a RED that didn't happen; the
+rest of the T10 stack (the four map helpers) *was* built test-first in the
+paused session per that session's own TDD convention (not independently
+re-verified here beyond the code review above).
+
+#### iOS key wiring (git-ignored key, missing key must not break the build)
+
+- `ios/Flutter/Secrets.xcconfig.example` (new, committed) — documents
+  `MAPS_API_KEY=` and how it's consumed.
+- `ios/.gitignore` — added `Flutter/Secrets.xcconfig`.
+- `ios/Flutter/Debug.xcconfig` / `Release.xcconfig` — added
+  `#include? "Secrets.xcconfig"` (optional include: a missing file is not an
+  error, `MAPS_API_KEY` then resolves to empty).
+- `ios/Runner/Info.plist` — added `GMSApiKey` = `$(MAPS_API_KEY)`.
+- `ios/Runner/AppDelegate.swift` — `import GoogleMaps`; in
+  `application(_:didFinishLaunchingWithOptions:)`, reads `GMSApiKey` from
+  the app bundle's `Info.plist` and calls `GMSServices.provideAPIKey(...)`
+  only when the value is non-empty, so a missing key never crashes launch
+  (the map view just won't render without one).
+
+#### Other
+
+- `assets/images/.gitkeep` added — the directory is declared as a
+  `pubspec.yaml` asset dir but was empty and therefore untracked by git;
+  per the task's explicit instruction, added a `.gitkeep` so it's tracked.
+
+#### Commands run (foreground, 2026-09-26)
+
+- `flutter test test/features/alerts/presentation/widgets/alert_map_card_test.dart`:
+  **2/2 passed** (run first, in isolation, to check RED — see honesty note
+  above; both passed immediately).
+- `flutter test`: **170/170 passed, 0 failed** (full suite, includes the 4
+  pre-existing map-helper test files + the new widget test file on top of
+  the prior 165-baseline... exact prior count not independently re-verified
+  since T9; this run is the count of record).
+- `flutter analyze`: **No issues found!**
+- `flutter build apk --debug`: **success** —
+  `build\app\outputs\flutter-apk\app-debug.apk` built via Gradle
+  `assembleDebug` (confirms a missing/blank `MAPS_API_KEY` in
+  `android/local.properties` does not break the Android build, since
+  `manifestPlaceholders["MAPS_API_KEY"]` defaults to `""` when the property
+  is absent).
+- `flutter build ios` (or any iOS build/Xcode step): **not run** — this
+  session is on Windows, which cannot build or verify iOS targets. The iOS
+  key-wiring code (xcconfig include chain, `Info.plist` key, `AppDelegate`
+  Swift change) is unverified beyond visual review and mirrors the working
+  Android pattern; flagging as the one acceptance-criterion aspect ("iOS
+  reads it from a git-ignored xcconfig... missing key must not break the
+  build") that could not be functionally confirmed on this machine.
+
+#### Not done / decision gaps (do not invent — flagging for the user)
+
+1. iOS build/launch is unverified (see above) — worth a manual check on
+   macOS before shipping, both with and without a real `MAPS_API_KEY`, to
+   confirm the optional-include chain and the `AppDelegate` guard behave as
+   intended.
+2. No widget test exercises the actual `GoogleMap` (marker/style/zoom)
+   rendering path — only the placeholder path is automated, per the task's
+   own instruction not to fight the platform-view test harness. The
+   marker-hue/zoom/style values were instead verified by direct code
+   comparison against the legacy Android source (see sanity-check section
+   above), not by a rendered-widget assertion.
+3. `alert_detail_sheet.dart` (like `profile_view.dart`/`emergency_view.dart`
+   before it) has no dedicated widget test for the sheet as a whole — only
+   the new `AlertMapCard` unit gets one, consistent with this codebase's
+   existing convention of leaving these larger presentation-layer sheets/
+   views untested end-to-end.

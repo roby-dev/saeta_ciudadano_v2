@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../domain/entities/citizen_alert_entity.dart';
 import '../providers/alerts_provider.dart';
+import 'alert_map_card.dart';
 
 class AlertDetailSheet extends StatefulWidget {
   const AlertDetailSheet({
@@ -161,6 +162,14 @@ class _AlertDetailSheetState extends State<AlertDetailSheet> {
                 label: 'Ubicación GPS',
                 value: '${alert.latitude.toStringAsFixed(6)}, ${alert.longitude.toStringAsFixed(6)}',
               ),
+              const SizedBox(height: 12),
+              AlertMapCard(
+                latitude: alert.latitude,
+                longitude: alert.longitude,
+                stateName: alert.stateName,
+                typeName: alert.typeName,
+              ),
+              const SizedBox(height: 8),
               if (alert.attendedByName != null)
                 _buildDetailTile(
                   icon: Icons.shield_outlined,
