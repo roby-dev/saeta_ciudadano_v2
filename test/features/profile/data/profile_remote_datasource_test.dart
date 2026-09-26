@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -99,6 +101,54 @@ void main() {
           )).captured.single as Map<String, dynamic>;
       expect(captured.containsKey('role'), isFalse);
       expect(captured.containsKey('statusAccount'), isFalse);
+    });
+  });
+
+  group('uploadAvatar', () {
+    late Directory tempDir;
+    late File tempFile;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('avatar_upload_test_');
+      tempFile = File('${tempDir.path}/avatar.jpg')
+        ..writeAsBytesSync([1, 2, 3]);
+    });
+
+    tearDown(() {
+      tempDir.deleteSync(recursive: true);
+    });
+
+    test('PUTs /v1/uploads/:id with a multipart "image" field and parses '
+        'the returned user', () async {
+      when(() => dio.put<Map<String, dynamic>>(
+            '/v1/uploads/u1',
+            data: any(named: 'data'),
+          )).thenAnswer(
+        (_) async => _response({
+          'ok': true,
+          'user': {
+            'id': 'u1',
+            'name': 'Ana',
+            'image': 'new-file-id.jpg',
+          },
+        }),
+      );
+
+      final result = await dataSource.uploadAvatar(
+        userId: 'u1',
+        filePath: tempFile.path,
+      );
+
+      expect(result, isA<UserModel>());
+      expect(result.id, 'u1');
+      expect(result.image, 'new-file-id.jpg');
+
+      final captured = verify(() => dio.put<Map<String, dynamic>>(
+            '/v1/uploads/u1',
+            data: captureAny(named: 'data'),
+          )).captured.single as FormData;
+      expect(captured.files, hasLength(1));
+      expect(captured.files.single.key, 'image');
     });
   });
 }

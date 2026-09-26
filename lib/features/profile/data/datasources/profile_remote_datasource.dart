@@ -12,6 +12,14 @@ abstract interface class ProfileRemoteDataSource {
     required String phone,
     required String email,
   });
+
+  /// Uploads a new avatar via `PUT /v1/uploads/:id`, sending [filePath] as a
+  /// multipart `image` field. Parses the response's `user` object, same as
+  /// [updateProfile].
+  Future<UserModel> uploadAvatar({
+    required String userId,
+    required String filePath,
+  });
 }
 
 class ProfileRemoteDataSourceImpl implements ProfileRemoteDataSource {
@@ -36,6 +44,26 @@ class ProfileRemoteDataSourceImpl implements ProfileRemoteDataSource {
         'phone': phone,
         'email': email,
       },
+    );
+    final data = response.data ?? <String, dynamic>{};
+    final userJson = data['user'] as Map<String, dynamic>? ?? {};
+    return UserModel.fromJson(userJson);
+  }
+
+  @override
+  Future<UserModel> uploadAvatar({
+    required String userId,
+    required String filePath,
+  }) async {
+    // MultipartFile.fromFile defaults filename to the basename of filePath
+    // and infers the content-type from its extension (via package:mime) —
+    // no need to set either explicitly.
+    final formData = FormData.fromMap({
+      'image': await MultipartFile.fromFile(filePath),
+    });
+    final response = await _dio.put<Map<String, dynamic>>(
+      '/v1/uploads/$userId',
+      data: formData,
     );
     final data = response.data ?? <String, dynamic>{};
     final userJson = data['user'] as Map<String, dynamic>? ?? {};

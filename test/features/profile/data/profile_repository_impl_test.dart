@@ -147,4 +147,93 @@ void main() {
       );
     });
   });
+
+  group('uploadAvatar', () {
+    test('returns Right with the updated entity on success', () async {
+      when(() => dataSource.uploadAvatar(
+            userId: 'u1',
+            filePath: '/tmp/avatar.jpg',
+          )).thenAnswer((_) async => _updatedModel);
+
+      final result = await repository.uploadAvatar(
+        userId: 'u1',
+        filePath: '/tmp/avatar.jpg',
+      );
+
+      expect(result.isRight(), isTrue);
+      result.fold(
+        (_) => fail('expected a success'),
+        (user) => expect(user, _updatedModel.toEntity()),
+      );
+    });
+
+    test('returns NetworkFailure on connection error', () async {
+      when(() => dataSource.uploadAvatar(
+            userId: 'u1',
+            filePath: '/tmp/avatar.jpg',
+          )).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: '/v1/uploads/u1'),
+          type: DioExceptionType.connectionError,
+        ),
+      );
+
+      final result = await repository.uploadAvatar(
+        userId: 'u1',
+        filePath: '/tmp/avatar.jpg',
+      );
+
+      result.fold(
+        (failure) => expect(failure, isA<NetworkFailure>()),
+        (_) => fail('expected a failure'),
+      );
+    });
+
+    test('returns ServerFailure with the backend message on a 400 bad '
+        'extension/size rejection', () async {
+      when(() => dataSource.uploadAvatar(
+            userId: 'u1',
+            filePath: '/tmp/avatar.jpg',
+          )).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: '/v1/uploads/u1'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/v1/uploads/u1'),
+            statusCode: 400,
+            data: {'message': 'Invalid image extension .pdf'},
+          ),
+        ),
+      );
+
+      final result = await repository.uploadAvatar(
+        userId: 'u1',
+        filePath: '/tmp/avatar.jpg',
+      );
+
+      result.fold(
+        (failure) {
+          expect(failure, isA<ServerFailure>());
+          expect(failure.message, 'Invalid image extension .pdf');
+        },
+        (_) => fail('expected a failure'),
+      );
+    });
+
+    test('returns UnknownFailure on an unexpected error', () async {
+      when(() => dataSource.uploadAvatar(
+            userId: 'u1',
+            filePath: '/tmp/avatar.jpg',
+          )).thenThrow(Exception('boom'));
+
+      final result = await repository.uploadAvatar(
+        userId: 'u1',
+        filePath: '/tmp/avatar.jpg',
+      );
+
+      result.fold(
+        (failure) => expect(failure, isA<UnknownFailure>()),
+        (_) => fail('expected a failure'),
+      );
+    });
+  });
 }

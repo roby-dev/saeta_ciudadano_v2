@@ -43,8 +43,12 @@ import 'features/emergency_contacts/domain/usecases/save_emergency_contacts_usec
 import 'features/emergency_contacts/presentation/providers/emergency_contacts_provider.dart';
 import 'features/profile/data/datasources/profile_remote_datasource.dart';
 import 'features/profile/data/repositories/profile_repository_impl.dart';
+import 'features/profile/data/services/image_picker_avatar_picker.dart';
 import 'features/profile/domain/repositories/profile_repository.dart';
+import 'features/profile/domain/services/avatar_file_validator.dart';
+import 'features/profile/domain/services/avatar_image_picker.dart';
 import 'features/profile/domain/usecases/update_profile_usecase.dart';
+import 'features/profile/domain/usecases/upload_avatar_usecase.dart';
 import 'features/register/data/datasources/register_remote_datasource.dart';
 import 'features/register/data/repositories/register_repository_impl.dart';
 import 'features/register/domain/repositories/register_repository.dart';
@@ -264,8 +268,19 @@ Future<void> setupServiceLocator() async {
   sl.registerLazySingleton<UpdateProfileUseCase>(
     () => UpdateProfileUseCase(sl<ProfileRepository>()),
   );
-  // ProfileEditProvider itself is constructed directly in
-  // ProfileEditPage (needs the runtime currentUser + an onUpdated callback
-  // into MainNavigationProvider, same convention as MainNavigationProvider
-  // being constructed directly in MainPage rather than via a get_it factory).
+  sl.registerLazySingleton<UploadAvatarUseCase>(
+    () => UploadAvatarUseCase(sl<ProfileRepository>()),
+  );
+  sl.registerLazySingleton<AvatarImagePicker>(
+    () => ImagePickerAvatarPicker(),
+  );
+  sl.registerLazySingleton<AvatarFileValidator>(
+    () => const AvatarFileValidator(),
+  );
+  // ProfileEditProvider/AvatarUploadProvider themselves are constructed
+  // directly at their usage site (ProfileEditPage / AvatarSection) — both
+  // need runtime-only constructor args (currentUser/userId + an onUpdated
+  // callback into MainNavigationProvider), same convention as
+  // MainNavigationProvider being constructed directly in MainPage rather
+  // than via a get_it factory.
 }

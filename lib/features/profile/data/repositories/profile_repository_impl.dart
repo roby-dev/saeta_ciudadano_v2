@@ -56,4 +56,33 @@ class ProfileRepositoryImpl implements ProfileRepository {
       return const Left(UnknownFailure());
     }
   }
+
+  @override
+  Future<Either<Failure, UserEntity>> uploadAvatar({
+    required String userId,
+    required String filePath,
+  }) async {
+    try {
+      final model = await _dataSource.uploadAvatar(
+        userId: userId,
+        filePath: filePath,
+      );
+      return Right(model.toEntity());
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout) {
+        return const Left(NetworkFailure());
+      }
+      // Includes the backend's 400 bad-extension/too-large message,
+      // surfaced as-is (client-side AvatarFileValidator already rejects the
+      // common cases before this call is ever made).
+      final message = _extractErrorMessage(
+        e.response?.data,
+        e.response?.statusMessage ?? 'Failed to upload avatar',
+      );
+      return Left(ServerFailure(message));
+    } catch (_) {
+      return const Left(UnknownFailure());
+    }
+  }
 }

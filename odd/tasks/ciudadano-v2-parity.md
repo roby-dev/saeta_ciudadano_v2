@@ -33,7 +33,7 @@ Out of scope: maps in alert detail, change password (tracked as later gaps).
 - [x] T6 — Auto-login on app start via `GET /v1/auth/me` (route: delegated direct — `AuthBloc._onSessionChecked`, new `GetCurrentUserUseCase` + `AuthRepository.getCurrentUser` + `AuthRemoteDataSource.getCurrentUser`, `service_locator` + tests). Commit `a836a74`.
 - [x] T7 — Listen to the backend's new `updatedProfile` socket event and live-update the profile view and emergency contacts (route: delegated direct — writer trigger: `RealtimeService` interface + impl, `MainNavigationProvider`, `EmergencyContactsProvider`, `service_locator`/`main_page` wiring + tests).
 - [x] T8 — Edit own profile (name, lastname, phone, email) via `PATCH /v1/users/:id` (route: delegated direct — new `profile` feature data/domain/presentation, edit form UI, `service_locator` + tests).
-- [ ] T9 — Avatar upload from camera or gallery via `PUT /v1/uploads/:id` and display via `GET /v1/uploads/:photo` (route: delegated direct — `image_picker` dependency, platform permissions, profile feature extension, UI + tests).
+- [x] T9 — Avatar upload from camera or gallery via `PUT /v1/uploads/:id` and display via `GET /v1/uploads/:photo` (route: delegated direct — `image_picker` dependency, platform permissions, profile feature extension, UI + tests).
 
 ## Acceptance criteria
 - T1: a 401 on an authenticated request triggers exactly one refresh (concurrent 401s share it), tokens are persisted, the original request is retried once; a failed refresh clears the session and returns the user to login. Refresh endpoint itself never loops.
@@ -1260,3 +1260,267 @@ built directly at its usage site instead of via a get_it factory.
    in theory.
 5. **T9 (avatar upload) is explicitly out of scope for this task** and was
    not started, per instruction.
+
+### T9 — Avatar upload (done)
+
+Route: delegated direct (writer trigger — new domain services + a new
+`AvatarUploadProvider`/`AvatarSection`, extending the existing `profile`
+feature's data/domain layers, `service_locator`, `pubspec.yaml`, iOS
+`Info.plist` + tests). Executed directly by the writer agent per explicit
+instruction not to spawn subagents this session.
+
+TDD: strict, source: user global config, runner: `flutter test`. Every unit
+was written test-first. RED observed first (all compile errors, same
+convention as every prior task): `MockAvatarImagePicker`'s
+`pickFromCamera`/`pickFromGallery` and `MockUploadAvatarUseCase`'s `call`
+undefined (the classes didn't exist yet), plus the new
+`ProfileRemoteDataSourceImpl.uploadAvatar`/`ProfileRepositoryImpl.uploadAvatar`
+methods and `AvatarFileValidator`/`AvatarUrlBuilder` classes not found — full
+list captured in the tool transcript. Then implemented to GREEN, no refactor
+step needed beyond the clean implementation. Suite grew from 132 tests (T8
+baseline) to **153 tests, all passing** (1 new `ProfileRemoteDataSourceImpl`,
+4 new `ProfileRepositoryImpl`, 6 new `AvatarFileValidator`, 3 new
+`AvatarUrlBuilder`, 7 new `AvatarUploadProvider`).
+
+#### Backend contract confirmation (read-only, `saeta-backend-v2`)
+
+Read `src/uploads/presentation/uploads.controller.ts`,
+`application/commands/upload-avatar.handler.ts`, and
+`infrastructure/local-storage.service.ts` directly (beyond the contract
+table in `realtime-profile-sync.md`), to confirm exactly:
+- `PUT /v1/uploads/:id` expects the file under the multipart field name
+  `image` (`FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024 }
+  } )`), JWT-guarded, owner-or-`ADMIN` only, response `{ ok, user }`.
+  Rejected extensions (only `png/jpg/jpeg/gif/webp` allowed, checked
+  case-insensitively server-side via the original filename) throw 400 with a
+  message naming the invalid extension.
+- `GET /v1/uploads/:photo` is **public** (`UploadsController.returnImage`
+  carries no `@UseGuards`) and serves the file directly
+  (`res.sendFile`) or redirects to a Google Drive fallback URL for a
+  legacy/non-local id, or the app's default avatar for the literal string
+  `'no-image'`. This client never sends that literal, so only the
+  empty-string/load-error placeholder paths apply.
+- `LocalStorageService.upload` names every stored file
+  `${randomUUID()}.${ext}` — **a replaced avatar always gets a brand-new file
+  id**, confirming the URL itself changes on every successful upload with no
+  manual cache-busting needed.
+- Installed Flutter's own Gradle plugin
+  (`packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt`)
+  defaults `minSdkVersion` to **24** in this SDK version (3.41.0), exactly
+  matching `image_picker`'s own minimum — confirmed by reading the installed
+  Flutter SDK source directly, not assumed.
+
+#### Dependency added (`pubspec.yaml`)
+
+- `image_picker: ^1.2.3` (resolved 1.2.3, plus `image_picker_android`
+  0.8.13+17 / `image_picker_ios` platform packages) — verified via pub.dev's
+  package API: latest stable, `Dart: ^3.10.0` / `Flutter: >=3.38.0`, both
+  satisfied by this project's installed Flutter 3.41.0 / Dart 3.11.0.
+  `flutter pub get` resolved cleanly, no conflicts.
+
+#### New: `lib/features/profile/domain/services/`
+
+- `avatar_image_picker.dart` — `AvatarImagePicker` interface
+  (`pickFromCamera()`/`pickFromGallery()`, both `Future<String?>`, `null` on
+  cancel), the seam that keeps `AvatarUploadProvider` unit-testable without a
+  platform channel.
+- `avatar_file_validator.dart` — `AvatarFileValidator.validate({path,
+  sizeBytes})`: rejects an unsupported extension or a size over 5MB with a
+  Spanish message, mirroring `UploadAvatarHandler`'s own
+  `ALLOWED_EXTENSIONS`/the `FileInterceptor`'s 5MB limit exactly, so an
+  obviously-bad pick fails fast client-side instead of round-tripping to the
+  server. This runs *after* the picker's own
+  `maxWidth`/`maxHeight`/`imageQuality` already keep normal photos well
+  under the limit — a defensive second check, not the primary size control.
+  6 tests: every allowed extension accepted case-insensitively; an
+  unsupported extension and a no-extension path rejected; a file over 5MB
+  rejected, one at exactly 5MB accepted.
+- `avatar_url_builder.dart` — `AvatarUrlBuilder.build(image)`: `null` for an
+  empty `image` id (no avatar yet, so the UI shows a placeholder instead of
+  requesting a broken URL), otherwise `'$baseUrl/v1/uploads/$image'`
+  (`baseUrl` defaults to `AppConstants.baseUrlSaeta`). 3 tests.
+
+#### New: `lib/features/profile/data/services/image_picker_avatar_picker.dart`
+
+`ImagePickerAvatarPicker implements AvatarImagePicker`, wrapping
+`package:image_picker`'s `ImagePicker().pickImage()` with `maxWidth`/
+`maxHeight` of 1600 and `imageQuality: 85` — keeps typical phone photos well
+under 5MB without an extra compression dependency; `AvatarFileValidator`
+still catches the rare outlier. Thin platform wrapper, deliberately
+untested, same convention as `NativeDeviceContactPicker`/
+`UrlLauncherSmsLauncher`.
+
+#### Changed: `lib/features/profile/domain/repositories/profile_repository.dart` / `data/datasources/profile_remote_datasource.dart` / `data/repositories/profile_repository_impl.dart`
+
+Extended the existing T8 `profile` feature (not a new repository) with
+`uploadAvatar({userId, filePath})`:
+- Datasource: builds `FormData.fromMap({'image': await
+  MultipartFile.fromFile(filePath)})` and `PUT`s `/v1/uploads/$userId`.
+  Confirmed by reading the installed `dio-5.11.1` source
+  (`multipart_file.dart`) that `MultipartFile.fromFile` already infers both
+  the filename (basename of the path) and the content-type (via
+  `package:mime`, based on the extension) automatically — no explicit
+  `filename`/`contentType` needed. Parses `response.data['user']` via the
+  existing `UserModel.fromJson`, same as `updateProfile`. 1 test (mocked
+  `Dio`, a real temp file on disk since `MultipartFile.fromFile` needs to
+  stat/stream an actual file): asserts the exact PUT path, exactly one
+  multipart file, and that its field key is `image`.
+- Repository: same `DioException` → `Failure` mapping pattern as
+  `updateProfile` (`NetworkFailure` on connection errors,
+  `ServerFailure` surfacing the backend's message — including the 400
+  bad-extension/size case — otherwise, `UnknownFailure` on anything else).
+  4 tests.
+
+#### New: `lib/features/profile/domain/usecases/upload_avatar_usecase.dart`
+
+`UploadAvatarUseCase` — thin pass-through, identical style to
+`UpdateProfileUseCase`. No dedicated test, same convention as other thin
+use-case pass-throughs in this codebase.
+
+#### New: `lib/features/profile/presentation/providers/avatar_upload_provider.dart`
+
+`AvatarUploadProvider extends ChangeNotifier`. Deliberately does **not**
+track the current user/avatar itself — `MainNavigationProvider.currentUser`
+(already watched by `ProfileView`) already owns that, so "on failure the
+current avatar is kept" falls out naturally from `onUpdated` simply not
+being called, no separate bookkeeping needed.
+`pickAndUploadFromCamera()`/`pickAndUploadFromGallery()` both go through one
+private `_pickAndUpload`: a cancelled pick (`null` path) returns `false` and
+touches no state; otherwise the file is validated
+(size read via an injected `Future<int> Function(String path)
+fileSizeReader`, defaulting to `File(path).length()`, so tests never touch
+the real filesystem for the size check) — a validation failure sets
+`errorMessage` and returns `false` without ever calling
+`UploadAvatarUseCase`; only past validation does `isUploading` become `true`
+for the duration of the call. On success, `onUpdated` fires with the fresh
+`UserEntity` (same wiring convention as `ProfileEditProvider.onUpdated` →
+`MainNavigationProvider.setUser`); on failure, `errorMessage` carries the
+backend's message and `onUpdated` is never called. 7 tests: cancel is a
+no-op; >5MB rejected without calling the use case; unsupported extension
+rejected without calling the use case; success calls `onUpdated` and clears
+state; failure never calls `onUpdated` and exposes the message; `isUploading`
+true only mid-flight (`Completer`-based, same pattern as
+`ProfileEditProvider`'s `isSaving` test); gallery delegates to the gallery
+picker, not the camera.
+
+#### New: `lib/features/profile/presentation/widgets/avatar_section.dart`
+
+`AvatarSection` (public) + private `_AvatarWithBadge`/`_AvatarPlaceholder`.
+Shows a placeholder (no tap target) when `user` is `null` (mirrors
+`ProfileView`'s existing disabled "Editar perfil" button under the same
+condition). Otherwise wraps a per-user `ChangeNotifierProvider<
+AvatarUploadProvider>` (keyed on the user id, constructed from
+`sl<UploadAvatarUseCase>()`/`sl<AvatarImagePicker>()`/
+`sl<AvatarFileValidator>()` + the passed-in `userId`/`onUpdated` — same
+"runtime-args provider built at its usage site" convention as
+`ProfileEditProvider`) around the avatar circle: `Image.network` built from
+`AvatarUrlBuilder` with an `errorBuilder` falling back to the user's
+initial, a small camera badge, a `CircularProgressIndicator` overlay while
+`isUploading`, and a tap handler (disabled while uploading) that opens a
+`showModalBottomSheet` with "Tomar foto" / "Elegir de galería"; the result
+is awaited and a success/error `SnackBar` shown directly from the tap
+handler (no separate error-message watcher needed). No dedicated widget
+test — consistent with this codebase's existing convention of leaving
+`profile_view.dart`/`emergency_contacts_section.dart`/`profile_edit_page.dart`
+without one (T2/T7/T8 already flagged and accepted this gap for view-layer
+files); fully covered indirectly via `AvatarUploadProvider`'s exhaustive
+unit tests.
+
+#### Decision: `AuthInterceptor`'s public-path list does not need `GET /v1/uploads/:photo`
+
+The task asked to decide whether the public `GET /v1/uploads/:photo`
+endpoint needs adding to `AuthInterceptor`'s public-path set. It does not,
+for a more fundamental reason than "harmless Bearer header": the avatar is
+rendered via Flutter's own `Image.network`/`NetworkImage`, which uses
+`dart:io`'s `HttpClient` directly and **never goes through the app's `Dio`
+instance or `AuthInterceptor` at all**. There is therefore no risk of a 401
+there triggering `AuthInterceptor`'s refresh-retry path — that code path is
+simply never reached for this request. `AuthInterceptor`'s public-path list
+was left unchanged.
+
+#### Decision: no cache-busting query parameter needed
+
+Verified (not assumed) by reading `LocalStorageService.upload`: every
+successful upload stores the file under a fresh `randomUUID()`-based
+filename and `UploadAvatarHandler` persists that new id as the user's
+`image` field. A replaced avatar therefore always changes the `GET
+/v1/uploads/:photo` URL itself, so `Image.network`'s own cache (keyed by
+URL) can never serve a stale image after a real replace — no manual
+cache-busting query parameter was added.
+
+#### Platform config
+
+- iOS (`ios/Runner/Info.plist`): added `NSCameraUsageDescription` and
+  `NSPhotoLibraryUsageDescription` (Spanish text, matching the app's
+  existing UI copy language) — required by `image_picker`'s iOS
+  implementation for camera/gallery access respectively; confirmed via the
+  package's own README (fetched from pub.dev), not guessed.
+  `NSMicrophoneUsageDescription` was **not** added since this feature never
+  records video.
+- Android: **no `AndroidManifest.xml` change** — confirmed via
+  `image_picker`'s README ("no configuration required on Android") and by
+  reading the installed Flutter SDK's Gradle plugin source directly
+  (`FlutterExtension.kt`), which shows this project's Flutter 3.41.0
+  defaults `minSdkVersion` to 24, exactly meeting `image_picker`'s minimum
+  — not assumed from the plugin's docs alone, cross-checked against the
+  actual installed toolchain.
+
+#### Changed: `lib/features/main/presentation/pages/profile_view.dart`
+
+Replaced the plain initials-only `CircleAvatar` with `AvatarSection(user:
+user, onUpdated: context.read<MainNavigationProvider>().setUser)` — resolved
+inline in `ProfileView.build()`, which (unlike `ProfileEditPage`) is *not*
+reached via `Navigator.push` and therefore sits inside `MainPage`'s
+`MultiProvider`, so `context.read<MainNavigationProvider>()` here is safe
+(same reasoning already documented for the existing "Editar perfil" button
+in this same file, which does the identical `context.read` call).
+
+#### Changed: `lib/service_locator.dart`
+
+Registers (all lazy singletons): `UploadAvatarUseCase` (via the existing
+`ProfileRepository`), `AvatarImagePicker` → `ImagePickerAvatarPicker()`,
+`AvatarFileValidator` → `const AvatarFileValidator()`. `AvatarUploadProvider`
+itself is not registered here, for the same reason `ProfileEditProvider`
+isn't — see the "wiring decision" carried over from T8.
+
+#### Commands run (foreground)
+
+- `flutter pub get`: success — `image_picker` (+ `image_picker_android`/
+  `image_picker_ios`) resolved, no errors (38 packages have newer versions
+  incompatible with current constraints, pre-existing/unrelated).
+- `flutter test`: **153/153 passed, 0 failed** (132 T1–T8 baseline + 1
+  datasource + 4 repository + 6 file-validator + 3 URL-builder + 7 provider).
+- `flutter analyze`: **No issues found!**
+
+#### Not done / decision gaps (do not invent — flagging for the user)
+
+1. **Not manually verified against a live server or a real device/emulator**
+   (no integration/E2E test, consistent with T1–T8) — the multipart field
+   name, response shape, and the `minSdkVersion`/content-type-inference
+   claims were confirmed by reading the backend's and Dio's/Flutter's own
+   source directly, not by performing a real camera/gallery upload against
+   the deployed backend or a physical device's camera.
+2. **`AvatarSection`/the bottom sheet have no dedicated widget test** —
+   consistent with this codebase's existing convention (same gap flagged
+   for `profile_view.dart`/`profile_edit_page.dart` in T2/T7/T8); the
+   `showModalBottomSheet` → pick → upload → `SnackBar` flow is covered
+   indirectly (via `AvatarUploadProvider`'s unit tests) but not end-to-end
+   as a widget.
+3. **`ImagePickerAvatarPicker` (the real `image_picker` wrapper) is
+   untested**, per this codebase's explicit convention for thin platform
+   wrappers (same as `NativeDeviceContactPicker`/`UrlLauncherSmsLauncher`)
+   — its `maxWidth`/`maxHeight`/`imageQuality` choices (1600px / 85) are
+   reasonable defaults, not values verified against real photos from real
+   devices for actual resulting file size.
+4. **iOS `NSPhotoLibraryUsageDescription`/`NSCameraUsageDescription`
+   wording and the whole iOS picker flow are unverified on a real device**
+   (no Mac/iOS toolchain available in this session) — same category of gap
+   already flagged for T2's iOS SMS behavior.
+5. **A legacy user record whose `image` field is literally the string
+   `'no-image'`** (the backend's own special-cased redirect target) would
+   still be passed through `Image.network` rather than being detected as
+   "no avatar" by `AvatarUrlBuilder` — harmless today (the backend redirects
+   `'no-image'` to a real fallback image, so it still renders something),
+   but this client never produces that literal itself, so it's an
+   unexercised edge case rather than a defect against the stated acceptance
+   criterion ("placeholder when empty or on load error").

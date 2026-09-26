@@ -30,6 +30,10 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Saeta Ciudadano necesita acceder a tu cámara para tomar una foto de perfil.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Saeta Ciudadano necesita acceder a tu galería para elegir una foto de perfil.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

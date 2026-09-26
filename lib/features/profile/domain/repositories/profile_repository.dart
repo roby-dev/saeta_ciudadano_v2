@@ -14,4 +14,11 @@ abstract interface class ProfileRepository {
     required String phone,
     required String email,
   });
+
+  /// Uploads a new avatar via `PUT /v1/uploads/:id` (multipart field
+  /// `image`). Same `DioException` → `Failure` mapping as [updateProfile].
+  Future<Either<Failure, UserEntity>> uploadAvatar({
+    required String userId,
+    required String filePath,
+  });
 }

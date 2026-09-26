@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../emergency_contacts/presentation/widgets/emergency_contacts_section.dart';
 import '../../../profile/presentation/pages/profile_edit_page.dart';
+import '../../../profile/presentation/widgets/avatar_section.dart';
 import '../providers/main_navigation_provider.dart';
 
 class ProfileView extends StatelessWidget {
@@ -64,17 +65,10 @@ class ProfileView extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         child: Column(
           children: [
-            // Avatar
-            CircleAvatar(
-              radius: 48,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              child: Text(
-                displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  color: theme.colorScheme.onPrimaryContainer,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+            // Avatar (tap or camera badge opens the camera/gallery picker)
+            AvatarSection(
+              user: user,
+              onUpdated: context.read<MainNavigationProvider>().setUser,
             ),
             const SizedBox(height: 16),
             Text(

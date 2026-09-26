@@ -33,6 +33,9 @@ dependencies:
   # Realtime updates over Socket.IO (compatible with the backend's
   # socket.io v4 server; the Dart client's v3.x line targets engine.io v4)
   socket_io_client: ^3.1.6
+  # Camera/gallery avatar picker (maxWidth/maxHeight/imageQuality keep
+  # uploads well under the backend's 5MB /v1/uploads/:id limit)
+  image_picker: ^1.2.3
 
 dev_dependencies:
   flutter_test:
