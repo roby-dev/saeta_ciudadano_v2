@@ -14,8 +14,12 @@ class EmergencyView extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         icon: Icon(
-          alertName == 'Emergencia' ? Icons.warning_amber_rounded : Icons.info_outline,
-          color: alertName == 'Emergencia' ? Colors.red : Theme.of(context).colorScheme.primary,
+          alertName == 'Emergencia'
+              ? Icons.warning_amber_rounded
+              : Icons.info_outline,
+          color: alertName == 'Emergencia'
+              ? Colors.red
+              : Theme.of(context).colorScheme.primary,
           size: 48,
         ),
         title: Text('Reportar $alertName'),
@@ -29,7 +33,8 @@ class EmergencyView extends StatelessWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: alertName == 'Emergencia' ? Colors.red.shade700 : null,
+              backgroundColor:
+                  alertName == 'Emergencia' ? Colors.red.shade700 : null,
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('ENVIAR ALERTA'),
@@ -65,7 +70,8 @@ class EmergencyView extends StatelessWidget {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          icon: const Icon(Icons.check_circle_outline, color: Colors.green, size: 52),
+          icon: const Icon(Icons.check_circle_outline,
+              color: Colors.green, size: 52),
           title: const Text('Alerta Enviada'),
           content: Text(
             'Tu alerta de $alertName fue registrada exitosamente en la central.\n'
@@ -107,83 +113,94 @@ class EmergencyView extends StatelessWidget {
     return Stack(
       children: [
         SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Zona de Alertas',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Selecciona el tipo de incidente para reportar inmediatamente',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // 2x3 Grid of Alert Types
-                GridView.count(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              // Fill the viewport so the content centers vertically, while still
+              // scrolling when it doesn't fit (small screens, large fonts).
+              child: ConstrainedBox(
+                constraints:
+                    BoxConstraints(minHeight: constraints.maxHeight - 48),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    EmergencyTypeCard(
-                      title: 'Robo',
-                      icon: Icons.local_police_outlined,
-                      backgroundColor: cardColor,
-                      onTap: () => _triggerSendAlert(context, 'Robo'),
+                    Text(
+                      'Zona de Alertas',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    EmergencyTypeCard(
-                      title: 'Incendio',
-                      icon: Icons.local_fire_department_outlined,
-                      backgroundColor: cardColor,
-                      onTap: () => _triggerSendAlert(context, 'Incendio'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Selecciona el tipo de incidente para reportar inmediatamente',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.grey.shade600,
+                      ),
                     ),
-                    EmergencyTypeCard(
-                      title: 'Violencia\nFamiliar',
-                      icon: Icons.family_restroom_outlined,
-                      backgroundColor: cardColor,
-                      onTap: () => _triggerSendAlert(context, 'Violencia Familiar'),
+                    const SizedBox(height: 24),
+
+                    // 2x3 Grid of Alert Types
+                    GridView.count(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: [
+                        EmergencyTypeCard(
+                          title: 'Robo',
+                          icon: Icons.local_police_outlined,
+                          backgroundColor: cardColor,
+                          onTap: () => _triggerSendAlert(context, 'Robo'),
+                        ),
+                        EmergencyTypeCard(
+                          title: 'Incendio',
+                          icon: Icons.local_fire_department_outlined,
+                          backgroundColor: cardColor,
+                          onTap: () => _triggerSendAlert(context, 'Incendio'),
+                        ),
+                        EmergencyTypeCard(
+                          title: 'Violencia\nFamiliar',
+                          icon: Icons.family_restroom_outlined,
+                          backgroundColor: cardColor,
+                          onTap: () =>
+                              _triggerSendAlert(context, 'Violencia Familiar'),
+                        ),
+                        EmergencyTypeCard(
+                          title: 'Accidente\nTránsito',
+                          icon: Icons.car_crash_outlined,
+                          backgroundColor: cardColor,
+                          onTap: () => _triggerSendAlert(
+                              context, 'Accidente de Tránsito'),
+                        ),
+                        EmergencyTypeCard(
+                          title: 'Pandillaje',
+                          icon: Icons.groups_outlined,
+                          backgroundColor: cardColor,
+                          onTap: () => _triggerSendAlert(context, 'Pandillaje'),
+                        ),
+                        EmergencyTypeCard(
+                          title: 'Otro',
+                          icon: Icons.help_outline,
+                          backgroundColor: cardColor,
+                          onTap: () => _triggerSendAlert(context, 'Otro'),
+                        ),
+                      ],
                     ),
-                    EmergencyTypeCard(
-                      title: 'Accidente\nTránsito',
-                      icon: Icons.car_crash_outlined,
-                      backgroundColor: cardColor,
-                      onTap: () => _triggerSendAlert(context, 'Accidente de Tránsito'),
-                    ),
-                    EmergencyTypeCard(
-                      title: 'Pandillaje',
-                      icon: Icons.groups_outlined,
-                      backgroundColor: cardColor,
-                      onTap: () => _triggerSendAlert(context, 'Pandillaje'),
-                    ),
-                    EmergencyTypeCard(
-                      title: 'Otro',
-                      icon: Icons.help_outline,
-                      backgroundColor: cardColor,
-                      onTap: () => _triggerSendAlert(context, 'Otro'),
+
+                    const SizedBox(height: 36),
+
+                    // Big SOS Button
+                    SosButton(
+                      onPressed: () => _triggerSendAlert(context, 'Emergencia'),
                     ),
                   ],
                 ),
-
-                const SizedBox(height: 36),
-
-                // Big SOS Button
-                SosButton(
-                  onPressed: () => _triggerSendAlert(context, 'Emergencia'),
-                ),
-              ],
+              ),
             ),
           ),
         ),
