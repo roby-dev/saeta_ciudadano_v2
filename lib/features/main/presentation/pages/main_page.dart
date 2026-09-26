@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/realtime/realtime_service.dart';
 import '../../../../core/storage/secure_storage.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../service_locator.dart';
 import '../../../auth/domain/entities/user_entity.dart';
 import '../providers/main_navigation_provider.dart';
@@ -63,24 +65,123 @@ class _MainScaffold extends StatelessWidget {
         index: currentIndex,
         children: _views,
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: currentIndex,
+      bottomNavigationBar: AppBottomNavigationBar(
+        currentIndex: currentIndex,
         onDestinationSelected: provider.setIndex,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.emergency_outlined),
-            selectedIcon: Icon(Icons.emergency),
-            label: 'Emergencia',
+      ),
+    );
+  }
+}
+
+/// Bottom navigation for [MainPage]: white background, top border, 3
+/// Spanish-labeled items, and a 3px top indicator bar + semibold label on
+/// the active item (per the approved redesign canvas). A standalone public
+/// widget so it stays unit-testable without standing up every provider
+/// [MainPage] wires (realtime service, secure storage, alerts/emergency
+/// providers).
+class AppBottomNavigationBar extends StatelessWidget {
+  const AppBottomNavigationBar({
+    super.key,
+    required this.currentIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  static const List<_NavItemData> _items = [
+    _NavItemData(
+      icon: Icons.emergency_outlined,
+      selectedIcon: Icons.emergency,
+      label: 'Emergencia',
+    ),
+    _NavItemData(
+      icon: Icons.notifications_outlined,
+      selectedIcon: Icons.notifications,
+      label: 'Alertas',
+    ),
+    _NavItemData(
+      icon: Icons.person_outline,
+      selectedIcon: Icons.person,
+      label: 'Perfil',
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: AppDimens.bottomNavHeight,
+          child: Row(
+            children: [
+              for (var i = 0; i < _items.length; i++)
+                Expanded(
+                  child: _NavItem(
+                    data: _items[i],
+                    selected: i == currentIndex,
+                    onTap: () => onDestinationSelected(i),
+                  ),
+                ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.notifications_outlined),
-            selectedIcon: Icon(Icons.notifications),
-            label: 'Alertas',
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItemData {
+  const _NavItemData({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.data,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _NavItemData data;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppColors.primary : AppColors.muted;
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            height: AppDimens.bottomNavIndicatorThickness,
+            color: selected ? AppColors.primary : Colors.transparent,
           ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Perfil',
+          const SizedBox(height: 6),
+          Icon(selected ? data.selectedIcon : data.icon, color: color),
+          const SizedBox(height: 2),
+          Text(
+            data.label,
+            style: TextStyle(
+              fontFamily: AppFonts.sans,
+              fontSize: 12,
+              color: color,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
           ),
         ],
       ),

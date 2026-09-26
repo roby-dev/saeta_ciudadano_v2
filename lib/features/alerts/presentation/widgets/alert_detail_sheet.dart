@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../domain/entities/citizen_alert_entity.dart';
 import '../providers/alerts_provider.dart';
 import 'alert_map_card.dart';
+import 'alert_state_pill.dart';
 
 class AlertDetailSheet extends StatefulWidget {
   const AlertDetailSheet({
@@ -128,12 +129,7 @@ class _AlertDetailSheetState extends State<AlertDetailSheet> {
                       ),
                     ),
                   ),
-                  Chip(
-                    label: Text(
-                      alert.stateName,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
+                  AlertStatePill(stateName: alert.stateName),
                 ],
               ),
               const SizedBox(height: 16),

@@ -45,7 +45,7 @@ grouping are derived from already-loaded alerts).
 
 ## Tasks
 - [x] U1 — Theme foundation: `AppColors`, `AppTheme` (ThemeData, text theme with bundled IBM Plex Sans/Mono, input/button/card/nav themes), wire into `app.dart`. (route: delegated direct)
-- [ ] U2 — Shared widgets: `AlertStatePill` (state → colors), `SectionCard`, bottom navigation restyle. (route: delegated direct)
+- [x] U2 — Shared widgets: `AlertStatePill` (state → colors), `SectionCard`, bottom navigation restyle. (route: delegated direct)
 - [ ] U3 — Login + Register restyle, Spanish copy. (route: delegated direct)
 - [ ] U4 — Emergencia view (blue header, SOS circle, incident grid, SMS row) + report confirmation sheet. (route: delegated direct)
 - [ ] U5 — Mis alertas (summary counts, Active/History grouping, cards) + alert detail sheet (summary, map, tracking timeline, attention data, rating). (route: delegated direct)
@@ -85,6 +85,40 @@ grouping are derived from already-loaded alerts).
   `unnecessary_const` infos along the way). Files: `pubspec.yaml`,
   `assets/fonts/*`, `lib/app.dart`, `lib/core/theme/app_colors.dart`,
   `lib/core/theme/app_theme.dart`, `test/core/theme/app_colors_test.dart`,
-  `test/core/theme/app_theme_test.dart`. Commit: recorded in the next
-  (U2) commit message trailer, since this file is committed together
-  with the U1 sources.
+  `test/core/theme/app_theme_test.dart`. Commit: `d5f7140`.
+- 2026-09-26: U2 done. Added
+  `lib/features/alerts/presentation/widgets/alert_state_pill.dart`
+  (`AlertStatePill`, `paletteFor` mapping — same case-insensitive
+  substring convention as `CitizenAlertEntity.isResolved`/etc. and
+  `alertMarkerHue`; unmatched state -> `AppColors.neutral`) and
+  `lib/core/widgets/section_card.dart` (`SectionCard`, generic enough to
+  be reused outside the alerts feature, hence `core/widgets` over
+  `features/alerts`). Restyled the bottom nav in `main_page.dart`:
+  replaced the Material 3 `NavigationBar` (which has no per-item top
+  indicator bar or a themeable top border) with a new public
+  `AppBottomNavigationBar` widget in the same file (white bg, `E2E8F0`
+  top border, 3px primary top indicator + semibold label on the active
+  item) — kept `MainPage`'s existing `MainNavigationProvider`/index
+  wiring unchanged. Mechanically swapped the existing ad-hoc state
+  chips for `AlertStatePill` in `alert_card.dart` (the colored
+  `Container`+`Text` badge) and `alert_detail_sheet.dart` (the plain
+  uncolored `Chip`); left `alert_card.dart`'s `_getStatusColor`/
+  `_getStatusBackgroundColor` in place since the type-icon `CircleAvatar`
+  still uses them (full card restyle is U5). TDD: RED observed
+  (`Method not found: 'SectionCard'/'AppBottomNavigationBar'`, missing
+  `alert_state_pill.dart`) on all 3 new test files before writing the
+  sources; GREEN after (14/14 new tests: 8 pill + 3 SectionCard + 3 nav).
+  Checks: `flutter test` 198/198 passed (184 baseline + 14 new);
+  `flutter analyze` 0 issues; `flutter build apk --debug` succeeded
+  (`app-debug.apk`, not installed/run — emulator has little disk space
+  per instructions). Files:
+  `lib/features/alerts/presentation/widgets/alert_state_pill.dart`,
+  `lib/core/widgets/section_card.dart`,
+  `lib/features/main/presentation/pages/main_page.dart`,
+  `lib/features/alerts/presentation/widgets/alert_card.dart`,
+  `lib/features/alerts/presentation/widgets/alert_detail_sheet.dart`,
+  `test/features/alerts/presentation/widgets/alert_state_pill_test.dart`,
+  `test/core/widgets/section_card_test.dart`,
+  `test/features/main/presentation/pages/app_bottom_navigation_bar_test.dart`.
+  Commit: recorded in the next commit's trailer, or left for the user to
+  record — noted in the final report.

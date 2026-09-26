@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../domain/entities/citizen_alert_entity.dart';
+import 'alert_state_pill.dart';
 
 class AlertCard extends StatelessWidget {
   const AlertCard({
@@ -105,22 +106,7 @@ class AlertCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: statusBgColor,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: statusColor.withValues(alpha: 0.5)),
-                    ),
-                    child: Text(
-                      alert.stateName,
-                      style: TextStyle(
-                        color: statusColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
+                  AlertStatePill(stateName: alert.stateName),
                 ],
               ),
               if (alert.attendedByName != null) ...[
