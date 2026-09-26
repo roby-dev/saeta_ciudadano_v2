@@ -17,6 +17,15 @@ abstract class RealtimeService {
   /// REST rather than render this payload directly.
   Stream<Map<String, dynamic>> get updatedAlerts;
 
+  /// Raw `updatedProfile` payloads as received from the server: a
+  /// sanitized `UserEntity`-shaped map (`id, name, lastname, dni, phone,
+  /// email, role, statusAccount, image, emergencyContacts, averageScore,
+  /// alertsAttended, availability, createdAt, updatedAt`), emitted to
+  /// `user:{id}` whenever that user's visible profile changes (including
+  /// emergency contacts and avatar uploads). A malformed (non-map) payload
+  /// is dropped before reaching this stream.
+  Stream<Map<String, dynamic>> get updatedProfiles;
+
   /// Connects using the currently stored access token. A no-op when there
   /// is no session (no stored token).
   Future<void> connect();

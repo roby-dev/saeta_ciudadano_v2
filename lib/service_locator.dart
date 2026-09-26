@@ -244,6 +244,7 @@ Future<void> setupServiceLocator() async {
       smsLauncher: sl<SmsLauncher>(),
       phoneNormalizer: sl<PeruvianPhoneNormalizer>(),
       messageBuilder: sl<SmsMessageBuilder>(),
+      realtimeService: sl<RealtimeService>(),
     ),
   );
 }

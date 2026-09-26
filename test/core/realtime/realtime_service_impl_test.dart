@@ -516,6 +516,34 @@ void main() {
     });
   });
 
+  group('updatedProfile', () {
+    test('forwards the raw payload on the updatedProfiles stream', () async {
+      final events = <Map<String, dynamic>>[];
+      final subscription = service.updatedProfiles.listen(events.add);
+
+      final handler = capturedHandlerFor('updatedProfile');
+      handler({'id': 'u1', 'name': 'Ana', 'statusAccount': 'HABILITADO'});
+      await _flush();
+
+      expect(events, [
+        {'id': 'u1', 'name': 'Ana', 'statusAccount': 'HABILITADO'},
+      ]);
+      await subscription.cancel();
+    });
+
+    test('ignores a non-map payload', () async {
+      final events = <Map<String, dynamic>>[];
+      final subscription = service.updatedProfiles.listen(events.add);
+
+      final handler = capturedHandlerFor('updatedProfile');
+      handler('not a map');
+      await _flush();
+
+      expect(events, isEmpty);
+      await subscription.cancel();
+    });
+  });
+
   group('disableUser', () {
     test('clears the session, disconnects, and signals the message',
         () async {

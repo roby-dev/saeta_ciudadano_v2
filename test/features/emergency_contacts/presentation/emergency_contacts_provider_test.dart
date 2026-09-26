@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:dartz/dartz.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:saeta_ciudadano_v2/core/errors/failure.dart';
+import 'package:saeta_ciudadano_v2/core/realtime/realtime_service.dart';
 import 'package:saeta_ciudadano_v2/core/storage/secure_storage.dart';
 import 'package:saeta_ciudadano_v2/features/emergency_contacts/domain/entities/emergency_contact_entity.dart';
 import 'package:saeta_ciudadano_v2/features/emergency_contacts/domain/services/device_contact_picker.dart';
@@ -24,6 +27,8 @@ class MockDeviceContactPicker extends Mock implements DeviceContactPicker {}
 
 class MockSmsLauncher extends Mock implements SmsLauncher {}
 
+class MockRealtimeService extends Mock implements RealtimeService {}
+
 const _userId = 'u1';
 const _ana = EmergencyContactEntity(name: 'Ana', phone: '987654321');
 const _luis = EmergencyContactEntity(name: 'Luis', phone: '912345678');
@@ -34,6 +39,8 @@ void main() {
   late MockSecureStorage storage;
   late MockDeviceContactPicker contactPicker;
   late MockSmsLauncher smsLauncher;
+  late MockRealtimeService realtimeService;
+  late StreamController<Map<String, dynamic>> profileController;
 
   EmergencyContactsProvider buildProvider() {
     return EmergencyContactsProvider(
@@ -44,6 +51,7 @@ void main() {
       smsLauncher: smsLauncher,
       phoneNormalizer: const PeruvianPhoneNormalizer(),
       messageBuilder: const SmsMessageBuilder(),
+      realtimeService: realtimeService,
     );
   }
 
@@ -57,10 +65,18 @@ void main() {
     storage = MockSecureStorage();
     contactPicker = MockDeviceContactPicker();
     smsLauncher = MockSmsLauncher();
+    realtimeService = MockRealtimeService();
+    profileController = StreamController<Map<String, dynamic>>.broadcast();
 
     when(() => storage.getUserId()).thenAnswer((_) async => _userId);
     when(() => storage.getSendSmsOnAlert()).thenAnswer((_) async => false);
     when(() => storage.setSendSmsOnAlert(any())).thenAnswer((_) async {});
+    when(() => realtimeService.updatedProfiles)
+        .thenAnswer((_) => profileController.stream);
+  });
+
+  tearDown(() {
+    profileController.close();
   });
 
   group('load', () {
@@ -380,6 +396,95 @@ void main() {
         ),
         completes,
       );
+    });
+  });
+
+  group('updatedProfile', () {
+    test('replaces the contact list when the payload id matches and '
+        'carries emergencyContacts', () async {
+      when(() => getContacts(_userId))
+          .thenAnswer((_) async => const Right([_ana]));
+      final provider = buildProvider();
+      await provider.load();
+
+      profileController.add({
+        'id': _userId,
+        'emergencyContacts': [
+          {'name': 'Luis', 'phone': '912345678'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(provider.contacts, [_luis]);
+      verifyNever(() => saveContacts(any(), any()));
+    });
+
+    test('ignores an event for a different userId', () async {
+      when(() => getContacts(_userId))
+          .thenAnswer((_) async => const Right([_ana]));
+      final provider = buildProvider();
+      await provider.load();
+
+      profileController.add({
+        'id': 'other-user',
+        'emergencyContacts': <Map<String, dynamic>>[],
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(provider.contacts, [_ana]);
+    });
+
+    test('leaves the list untouched when the payload has no '
+        'emergencyContacts key', () async {
+      when(() => getContacts(_userId))
+          .thenAnswer((_) async => const Right([_ana]));
+      final provider = buildProvider();
+      await provider.load();
+
+      profileController.add({'id': _userId, 'name': 'Ana renamed'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(provider.contacts, [_ana]);
+    });
+
+    test('forces the sms-on-alert preference off and persists it when the '
+        'new list is empty', () async {
+      when(() => getContacts(_userId))
+          .thenAnswer((_) async => const Right([_ana]));
+      when(() => storage.getSendSmsOnAlert()).thenAnswer((_) async => true);
+      final provider = buildProvider();
+      await provider.load();
+      expect(provider.sendSmsOnAlert, isTrue);
+
+      profileController.add({
+        'id': _userId,
+        'emergencyContacts': <Map<String, dynamic>>[],
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(provider.contacts, isEmpty);
+      expect(provider.sendSmsOnAlert, isFalse);
+      verify(() => storage.setSendSmsOnAlert(false)).called(1);
+    });
+
+    test('cancels the subscription on dispose', () async {
+      when(() => getContacts(_userId))
+          .thenAnswer((_) async => const Right([_ana]));
+      final provider = buildProvider();
+      await provider.load();
+
+      provider.dispose();
+      profileController.add({
+        'id': _userId,
+        'emergencyContacts': [
+          {'name': 'Luis', 'phone': '912345678'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      // A notifyListeners() call after dispose() throws in debug mode, so
+      // the absence of an exception here proves the subscription was
+      // cancelled.
     });
   });
 }

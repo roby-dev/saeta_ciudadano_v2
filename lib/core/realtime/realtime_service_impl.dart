@@ -86,6 +86,11 @@ class RealtimeServiceImpl implements RealtimeService {
           : 'Su cuenta ha sido deshabilitada';
       unawaited(_handleDisableUser(message));
     });
+    _socket.on('updatedProfile', (data) {
+      if (data is Map) {
+        _updatedProfilesController.add(Map<String, dynamic>.from(data));
+      }
+    });
   }
 
   /// The exact disconnect reason the vendor client reports when the
@@ -106,6 +111,8 @@ class RealtimeServiceImpl implements RealtimeService {
   final Duration Function(int attempt) _backoffForAttempt;
   final int Function() _jitterMillis;
   final StreamController<Map<String, dynamic>> _updatedAlertsController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _updatedProfilesController =
       StreamController<Map<String, dynamic>>.broadcast();
 
   /// Whether the socket is currently believed to be connected (updated by
@@ -131,6 +138,10 @@ class RealtimeServiceImpl implements RealtimeService {
   @override
   Stream<Map<String, dynamic>> get updatedAlerts =>
       _updatedAlertsController.stream;
+
+  @override
+  Stream<Map<String, dynamic>> get updatedProfiles =>
+      _updatedProfilesController.stream;
 
   @override
   Future<void> connect() async {
@@ -214,5 +225,6 @@ class RealtimeServiceImpl implements RealtimeService {
   void dispose() {
     _cancelPendingRetry();
     _updatedAlertsController.close();
+    _updatedProfilesController.close();
   }
 }

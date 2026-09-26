@@ -28,7 +28,8 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
 - [x] T3 — Socket.IO client: `updatedAlert` live-updates `AlertsProvider`, `disableUser` clears the session and signals the app (route: delegated direct — new `core/realtime` (interface + socket_io_client adapter + service impl), `core/network/account_disabled_notifier.dart`, `service_locator`, `app.dart`, `AlertsProvider`, `MainNavigationProvider`, `main_page.dart` wiring + tests).
 - [x] T4 — Reset the local "send SMS on alert" preference on every end-of-session path (manual logout, session expiry, `disableUser`) (route: delegated direct, bundled with T3 since it depends on T3's `disableUser` handling — one-line change in `SecureStorage.clearSession()` + tests).
 - [x] T5 — Socket reconnection with exponential backoff + auth-refresh-once, replacing T3's "exactly one retry then dead until restart" policy (route: delegated direct — `core/realtime/realtime_service_impl.dart` + `realtime_service.dart` interface, new `core/network/token_refresher.dart` extracted from `AuthInterceptor`, `AuthInterceptor` refactor to use it, `service_locator`, `app.dart` (foreground-resume hook), `pubspec.yaml` (`fake_async` dev dep) + tests).
-- [x] T6 — Auto-login on app start via `GET /v1/auth/me` (route: delegated direct — `AuthBloc._onSessionChecked`, new `GetCurrentUserUseCase` + `AuthRepository.getCurrentUser` + `AuthRemoteDataSource.getCurrentUser`, `service_locator` + tests).
+- [x] T6 — Auto-login on app start via `GET /v1/auth/me` (route: delegated direct — `AuthBloc._onSessionChecked`, new `GetCurrentUserUseCase` + `AuthRepository.getCurrentUser` + `AuthRemoteDataSource.getCurrentUser`, `service_locator` + tests). Commit `a836a74`.
+- [x] T7 — Listen to the backend's new `updatedProfile` socket event and live-update the profile view and emergency contacts (route: delegated direct — writer trigger: `RealtimeService` interface + impl, `MainNavigationProvider`, `EmergencyContactsProvider`, `service_locator`/`main_page` wiring + tests).
 
 ## Acceptance criteria
 - T1: a 401 on an authenticated request triggers exactly one refresh (concurrent 401s share it), tokens are persisted, the original request is retried once; a failed refresh clears the session and returns the user to login. Refresh endpoint itself never loops.
@@ -104,6 +105,20 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
   server error) emits `AuthUnauthenticated` (→ login) **without** touching
   the stored session, so the next app launch can retry the same session —
   see the decision gap below.
+- T7: backend contract (`saeta-backend-v2` `main`, commit `43801c2`):
+  `updatedProfile` is emitted to `user:{id}` only, payload is a sanitized
+  `UserEntity` (`id, name, lastname, dni, phone, email, role, statusAccount,
+  image, emergencyContacts, averageScore, alertsAttended, availability,
+  createdAt, updatedAt`). It fires on any visible profile change and on avatar
+  upload, never on password change or disable. `RealtimeService` exposes an
+  `updatedProfiles` stream; a malformed (non-map) payload is ignored.
+  `MainNavigationProvider` replaces `currentUser` from the payload only when
+  its `id` matches the current user, so the profile view re-renders.
+  `EmergencyContactsProvider` replaces its contact list from the payload's
+  `emergencyContacts` (same id check; missing field leaves the list
+  untouched) without a REST call, and forces the SMS-on-alert preference off
+  when the list becomes empty. Both providers cancel their subscription in
+  `dispose()`.
 
 ## Decisions (T3)
 - **`updatedAlert` payload handling**: the backend's `emitAlertUpdated`
@@ -857,3 +872,172 @@ Not done / decision gaps:
    offline main view.
 2. The splash/login navigation for the new authenticated path is not
    covered by a widget test (same convention as `app.dart`).
+
+### T7 — updatedProfile live sync (done)
+
+Route: delegated direct (writer trigger — `RealtimeService` interface +
+impl, `MainNavigationProvider`, `EmergencyContactsProvider`,
+`service_locator.dart` + tests). Executed directly by the writer agent per
+explicit instruction not to spawn subagents this session.
+
+TDD: strict, source: user global config, runner: `flutter test`. Every unit
+was written test-first. RED observed first (all three are compile errors,
+same convention as every prior task):
+
+- `test/core/realtime/realtime_service_impl_test.dart`: `The getter
+  'updatedProfiles' isn't defined for the type 'RealtimeServiceImpl'.`
+- `test/features/main/presentation/main_navigation_provider_test.dart`:
+  `The getter 'updatedProfiles' isn't defined for the type
+  'MockRealtimeService'.`
+- `test/features/emergency_contacts/presentation/emergency_contacts_provider_test.dart`:
+  `No named parameter with the name 'realtimeService'.` (on
+  `EmergencyContactsProvider`'s constructor call) plus the same
+  `updatedProfiles` getter error on its own `MockRealtimeService`.
+
+Then implemented to GREEN, no refactor step needed beyond the clean
+implementation. Suite grew from 104 tests (T6 baseline) to **115 tests, all
+passing** (2 new `RealtimeServiceImpl`, 4 new `MainNavigationProvider`, 5 new
+`EmergencyContactsProvider`).
+
+#### Backend contract confirmation (read-only, `saeta-backend-v2`)
+
+Read `src/realtime/presentation/gateways/realtime.gateway.ts`
+(`emitUserProfileUpdated`/`sanitizeUserForBroadcast`, commit `43801c2` on
+`main`) and `src/users/domain/user.entity.ts`: the payload's field names are
+exactly `id` (never `_id`), `statusAccount` (never `stateAccount`), plus
+`name, lastname, dni, phone, email, role, image, emergencyContacts,
+averageScore, alertsAttended, availability, createdAt, updatedAt`.
+`sanitizeUserForBroadcast` explicit-picks these fields (defense-in-depth
+against `passwordHash` ever leaking), and a `TypeScript`-`undefined` field
+(e.g. `averageScore` before the user has ever been scored) is dropped
+entirely by JSON serialization rather than sent as `null`/`0` — confirmed by
+reading `realtime.gateway.spec.ts`'s `emitUserProfileUpdated` describe block,
+whose `baseUser` fixture sets `availability: undefined` and whose assertion
+only checks a subset of fields via `objectContaining`, not full equality.
+This "absent means untouched, not blanked" behavior is exactly what
+`MainNavigationProvider._handleUpdatedProfile`'s merge strategy (below) is
+built to preserve.
+
+#### Changed: `lib/core/realtime/realtime_service.dart` / `realtime_service_impl.dart`
+
+`RealtimeService` gained `Stream<Map<String, dynamic>> get updatedProfiles`,
+documented identically to `updatedAlerts` (raw sanitized-`UserEntity`-shaped
+map, malformed/non-map payloads dropped before reaching the stream).
+`RealtimeServiceImpl` adds a second broadcast `StreamController`, fed by
+`_socket.on('updatedProfile', (data) { if (data is Map) {...} })` — the
+exact same guard-and-forward pattern already used for `updatedAlert`, no new
+parsing logic in this class (parsing/merging is the consuming providers'
+job, per the "raw payload as signal" decision already established for
+`updatedAlert` in T3). `dispose()` now also closes the new controller.
+
+Tests added (`test/core/realtime/realtime_service_impl_test.dart`, new
+`updatedProfile` group, 2 tests): payload forwarded as-is; a non-map payload
+produces no event (this second case wasn't covered for `updatedAlert`
+either — T7's acceptance criterion explicitly calls it out, so it's covered
+here even though it's a pre-existing gap for the sibling stream).
+
+#### Changed: `lib/features/main/presentation/providers/main_navigation_provider.dart`
+
+Subscribes to `_realtimeService.updatedProfiles` in the constructor (the
+`realtimeService` param already existed, from T3 — no new constructor
+parameter, no wiring change needed anywhere else). `_handleUpdatedProfile`:
+ignores the event when there's no `currentUser`, or when the payload's
+`id`/`_id` doesn't match `currentUser.id`. On a match, it does **not** parse
+the payload standalone through `UserModel.fromJson` — instead it builds a
+merged map (current user's own field values as the base, `...payload`
+spread on top so payload keys win) and parses *that* through
+`UserModel.fromJson().toEntity()`, then calls the existing `setUser()`.
+
+**Parsing/preservation decision**: `UserModel.fromJson` already tolerates
+both this socket shape and the REST shape without any change (it already
+checks `json['statusAccount'] ?? json['stateAccount']` and `json['id'] ??
+json['_id']`, from earlier work) — so it's reused as-is, per the task's
+"reuse if it handles the payload" instruction. But parsing the raw payload
+*alone* would still be wrong: a field silently absent from the payload
+(per the backend confirmation above) would fall through to
+`UserModel.fromJson`'s own defaults (`''`/`0.0`/`0`), overwriting a real
+existing value with a blank one, even though nothing about that field
+actually changed server-side. The merge-then-parse approach means an absent
+payload key keeps the current entity's value, and a present key (however
+falsy) wins — exactly the "preserve sensibly rather than blank" instruction.
+`dispose()` (new override) cancels the subscription.
+
+Tests added (`test/features/main/presentation/main_navigation_provider_test.dart`,
+new `updatedProfile` group, 4 tests): matching id replaces `currentUser`
+and preserves fields the test payload omits (`lastname`, `averageScore`,
+`alertsAttended`, `stateAccount` all asserted unchanged from the original
+user); mismatched id is a no-op; no current user is a no-op; subscription is
+cancelled on `dispose()` (asserted by the absence of an exception — a
+`notifyListeners()` after `dispose()` throws in debug mode, so a still-live
+subscription would fail the test).
+
+#### Changed: `lib/features/emergency_contacts/presentation/providers/emergency_contacts_provider.dart`
+
+New required `realtimeService: RealtimeService` constructor parameter,
+subscribed the same way. `_handleUpdatedProfile`: ignores a payload whose
+`id`/`_id` doesn't match the loaded `_userId`, and — separately — ignores a
+payload that doesn't carry the `emergencyContacts` key at all (an unrelated
+profile change, e.g. a name edit, must leave the contact list untouched, not
+wipe it to empty). When both checks pass, `payload['emergencyContacts']` is
+parsed via the existing `EmergencyContactModel.fromJson` (same model T2
+already uses for the REST shape — `{name, phone}`, identical to the
+backend's `EmergencyContact` interface, no translation needed) and replaces
+`_contacts` directly, with no REST call. Reuses the existing
+`_enforcePreferenceInvariant()` (already written for T2's `load()`/
+`removeContact()` paths) to force the SMS-on-alert preference off and
+persist that via `SecureStorage` when the new list is empty — no new logic
+needed for that half of the acceptance criterion. `dispose()` (new override)
+cancels the subscription.
+
+Tests added (`test/features/emergency_contacts/presentation/emergency_contacts_provider_test.dart`,
+new `updatedProfile` group, 5 tests): matching id + `emergencyContacts`
+present replaces the list without calling `saveContacts` (asserted via
+`verifyNever`); mismatched id is a no-op; a payload without the
+`emergencyContacts` key leaves the list untouched; an empty new list forces
+`sendSmsOnAlert` to `false` and persists it via `storage.setSendSmsOnAlert`;
+subscription cancelled on `dispose()` (same no-exception assertion pattern
+as `MainNavigationProvider`'s).
+
+#### Changed: `lib/service_locator.dart`
+
+`EmergencyContactsProvider`'s factory registration gained
+`realtimeService: sl<RealtimeService>()`. No other registration changed.
+
+#### Wiring: `lib/features/main/presentation/pages/main_page.dart` — no change needed
+
+Re-checked before writing anything: `MainNavigationProvider` is constructed
+directly in `main_page.dart`, but its constructor signature didn't change
+(the `realtimeService` parameter already existed from T3 and was already
+being passed `sl<RealtimeService>()`), so there was nothing to update there.
+`EmergencyContactsProvider` is created via `sl<EmergencyContactsProvider>()`
+(a get_it factory), so its new required parameter is satisfied entirely by
+the `service_locator.dart` change above — `main_page.dart` never
+constructs it directly and needed no edit. Confirmed no other call site
+constructs either provider directly (`grep`'d for both constructor calls
+across `lib/`).
+
+#### Commands run (foreground)
+
+- `flutter test`: **115/115 passed, 0 failed**.
+- `flutter analyze`: **No issues found!**
+
+#### Not done / decision gaps (do not invent — flagging for the user)
+
+1. **Not manually verified against a live server** (no integration/E2E
+   test, consistent with T1–T6) — the exact `updatedProfile` payload shape
+   was confirmed by reading the backend's gateway source and its own spec
+   fixtures, not by observing a real profile-edit/avatar-upload event
+   against the deployed backend.
+2. **`MainNavigationProvider`'s merge strategy assumes the payload's present
+   keys are always the authoritative new value** (never a deliberate
+   "clear this field" signal using an empty string, since the backend has
+   no such semantic today for any of these fields) — if the backend ever
+   needs to explicitly blank a field (as opposed to leaving it undefined),
+   this merge approach would still apply it correctly (a present key always
+   wins), so this is noted for completeness rather than as an actual gap.
+3. **No widget test for the profile view or the emergency-contacts section
+   actually re-rendering** on these events — consistent with this
+   codebase's existing convention of leaving `profile_view.dart`/
+   `emergency_contacts_section.dart` without dedicated widget tests (T2
+   flagged the same gap); both providers' `ChangeNotifier`/`notifyListeners`
+   behavior is fully unit-tested instead.

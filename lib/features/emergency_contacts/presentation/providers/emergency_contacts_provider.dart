@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import '../../../../core/realtime/realtime_service.dart';
 import '../../../../core/storage/secure_storage.dart';
+import '../../data/models/emergency_contact_model.dart';
 import '../../domain/entities/emergency_contact_entity.dart';
 import '../../domain/services/device_contact_picker.dart';
 import '../../domain/services/peruvian_phone_normalizer.dart';
@@ -22,13 +26,20 @@ class EmergencyContactsProvider extends ChangeNotifier {
     required SmsLauncher smsLauncher,
     required PeruvianPhoneNormalizer phoneNormalizer,
     required SmsMessageBuilder messageBuilder,
+    required RealtimeService realtimeService,
   })  : _getContactsUseCase = getContactsUseCase,
         _saveContactsUseCase = saveContactsUseCase,
         _storage = storage,
         _contactPicker = contactPicker,
         _smsLauncher = smsLauncher,
         _phoneNormalizer = phoneNormalizer,
-        _messageBuilder = messageBuilder;
+        _messageBuilder = messageBuilder {
+    // Live profile sync: a socket `updatedProfile` event for this user
+    // replaces the contact list without a REST round-trip (see
+    // _handleUpdatedProfile for the exact rules).
+    _profileSubscription =
+        realtimeService.updatedProfiles.listen(_handleUpdatedProfile);
+  }
 
   static const int maxContacts = 5;
 
@@ -39,6 +50,7 @@ class EmergencyContactsProvider extends ChangeNotifier {
   final SmsLauncher _smsLauncher;
   final PeruvianPhoneNormalizer _phoneNormalizer;
   final SmsMessageBuilder _messageBuilder;
+  late final StreamSubscription<Map<String, dynamic>> _profileSubscription;
 
   String? _userId;
   List<EmergencyContactEntity> _contacts = [];
@@ -210,5 +222,43 @@ class EmergencyContactsProvider extends ChangeNotifier {
       debugPrint('EmergencyContactsProvider: failed to open SMS composer: '
           '$error');
     }
+  }
+
+  /// Reacts to a live `updatedProfile` socket event: replaces the contact
+  /// list from the payload's `emergencyContacts` field, without a REST
+  /// call, when the payload is for this user.
+  ///
+  /// The `emergencyContacts` key is only present on the payload when it's
+  /// part of what changed server-side (see `RealtimeService.updatedProfiles`
+  /// docs), so its absence means "unrelated profile change" and the current
+  /// list is left untouched rather than wiped. An id that doesn't match the
+  /// loaded [_userId] is ignored the same way.
+  void _handleUpdatedProfile(Map<String, dynamic> payload) {
+    final id = payload['id'] as String? ?? payload['_id'] as String?;
+    if (id == null || id != _userId) return;
+    if (!payload.containsKey('emergencyContacts')) return;
+
+    final rawContacts = payload['emergencyContacts'];
+    _contacts = rawContacts is List
+        ? rawContacts
+            .whereType<Map>()
+            .map((contact) => EmergencyContactModel.fromJson(
+                  Map<String, dynamic>.from(contact),
+                ).toEntity())
+            .toList()
+        : <EmergencyContactEntity>[];
+
+    // Fire-and-forget: the sendSmsOnAlert getter already reflects the
+    // forced-off state from _contacts.isEmpty immediately; this just
+    // persists it, same convention as the rest of this class's use of
+    // _enforcePreferenceInvariant().
+    unawaited(_enforcePreferenceInvariant());
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _profileSubscription.cancel();
+    super.dispose();
   }
 }
