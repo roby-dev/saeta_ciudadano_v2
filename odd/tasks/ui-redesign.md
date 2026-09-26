@@ -47,7 +47,7 @@ grouping are derived from already-loaded alerts).
 - [x] U1 — Theme foundation: `AppColors`, `AppTheme` (ThemeData, text theme with bundled IBM Plex Sans/Mono, input/button/card/nav themes), wire into `app.dart`. (route: delegated direct)
 - [x] U2 — Shared widgets: `AlertStatePill` (state → colors), `SectionCard`, bottom navigation restyle. (route: delegated direct)
 - [x] U3 — Login + Register restyle, Spanish copy. (route: delegated direct)
-- [ ] U4 — Emergencia view (blue header, SOS circle, incident grid, SMS row) + report confirmation sheet. (route: delegated direct)
+- [x] U4 — Emergencia view (blue header, SOS circle, incident grid, SMS row) + report confirmation sheet. (route: delegated direct)
 - [ ] U5 — Mis alertas (summary counts, Active/History grouping, cards) + alert detail sheet (summary, map, tracking timeline, attention data, rating). (route: delegated direct)
 - [ ] U6 — Mi perfil (identity card, personal data, contacts, SMS switch, logout) + profile edit page. (route: delegated direct)
 
@@ -165,4 +165,56 @@ grouping are derived from already-loaded alerts).
   `test/features/auth/presentation/widgets/saeta_text_field_test.dart`,
   `test/features/auth/presentation/pages/login_page_test.dart`,
   `test/features/register/presentation/pages/register_page_test.dart`.
-  Commit: left for the user to record (noted in the final report).
+  Commit: `1bdbe3a`.
+- 2026-09-26: U4 done. Restyled `EmergencyView`: blue `#1976D2` header
+  band (small 34px icon tile + "SAETA"/"Ciudadano", 40px initials avatar
+  → switches to the Perfil tab, "Hola, {nombre}") overlapped by a white
+  radius-16 hero card (`Transform.translate`, same paint-only overlap
+  technique as U3's login/register cards). No GPS pill: `MainNavigationProvider`
+  has no location state and this task is presentation-only, so adding one
+  was out of scope — omitted per the task's own instruction. Restyled
+  `SosButton` to the two-circle design (168px `AppColors.dangerTint` ring
+  / 136px `AppColors.danger` circle, "SOS" + label) and `EmergencyTypeCard`
+  to a white bordered tile with a 38px `AppColors.primaryTint` icon square
+  (dropped its `backgroundColor` param — only ever used by this view).
+  Reordered/relabeled the incident grid to the canvas's single-line
+  Spanish labels ("Robo", "Incendio", "Accidente de tránsito",
+  "Pandillaje", "Violencia familiar", "Otro") while keeping the
+  backend-facing type name passed to `sendAlert`/the SMS body unchanged
+  (e.g. grid shows "Accidente de tránsito", `_triggerSendAlert` still
+  gets "Accidente de Tránsito") — decouples display copy from the
+  existing type-matching/SMS-text behavior. Added the "SMS a contactos de
+  emergencia" row (reuses `AppColors.resuelta.background/.text`, an exact
+  hex match for the canvas's `#ECFDF5`/`#047857`) driven by
+  `EmergencyContactsProvider.sendSmsOnAlert`/`.contacts`, tapping it also
+  switches to Perfil. Replaced the `AlertDialog` confirmation with a
+  modal bottom sheet (top radius 20, grabber, type icon, bordered info
+  list) — GPS row always shows "Se obtendrá al enviar" (position isn't
+  fetched until after confirmation, so there's never a coordinate to
+  show at this point) and the SMS row only when enabled with ≥1 contact;
+  kept the exact same post-confirmation flow (`sendAlert`,
+  `AlertsProvider.refreshAlerts`, `EmergencyContactsProvider.sendSmsForAlert`,
+  success/error dialogs) — success dialog title restyled to "Alerta
+  enviada" (spec's lowercase, was "Alerta Enviada"); the error dialog's
+  dismiss button was already "Cerrar". SOS button's own alert flow (type
+  "Emergencia") is unchanged. TDD: RED observed (10/11 new tests failing
+  — missing header/grid/SMS-row copy, sheet not opening, wrong dialog
+  title) on the new `emergency_view_test.dart` before writing the
+  sources; GREEN after (11/11). Two mid-GREEN fixes: (1) a same-named
+  "SMS a contactos de emergencia" label exists both in the persistent row
+  and, conditionally, inside the sheet, so the "hidden when SMS is off"
+  assertion had to check the value text instead of the shared label; (2)
+  `EmergencyProvider.sendAlert()` calls the real Geolocator plugin, which
+  hangs forever under `flutter test` with no platform binding registered
+  — mocked the `flutter.baseflow.com/geolocator` method channel
+  (`isLocationServiceEnabled: false`) so `_determinePosition()`'s own
+  fallback kicks in immediately, and used bounded `tester.pump(...)`
+  calls instead of `pumpAndSettle()` after sending (the loading overlay's
+  indeterminate `CircularProgressIndicator` never lets `pumpAndSettle`
+  converge). Checks: `flutter test` 228/228 passed (217 baseline + 11
+  new); `flutter analyze` 0 issues. Files:
+  `lib/features/main/presentation/pages/emergency_view.dart`,
+  `lib/features/main/presentation/widgets/sos_button.dart`,
+  `lib/features/main/presentation/widgets/emergency_type_card.dart`,
+  `test/features/main/presentation/pages/emergency_view_test.dart`.
+  Commit: left for the user to record.
