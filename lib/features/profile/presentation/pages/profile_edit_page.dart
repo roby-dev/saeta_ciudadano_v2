@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../service_locator.dart';
 import '../../../auth/domain/entities/user_entity.dart';
+import '../../../auth/presentation/widgets/saeta_text_field.dart';
 import '../../../emergency_contacts/domain/services/peruvian_phone_normalizer.dart';
 import '../../domain/usecases/update_profile_usecase.dart';
 import '../providers/profile_edit_provider.dart';
@@ -98,69 +101,71 @@ class _ProfileEditFormState extends State<_ProfileEditForm> {
     final provider = context.watch<ProfileEditProvider>();
 
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Editar Perfil'),
+        title: const Text('Editar perfil'),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre',
-                  border: OutlineInputBorder(),
+        padding: const EdgeInsets.all(20),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SaetaTextField(
+                  label: 'Nombre',
+                  controller: _nameController,
+                  validator: (value) => provider.validateName(value ?? ''),
                 ),
-                validator: (value) => provider.validateName(value ?? ''),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _lastnameController,
-                decoration: const InputDecoration(
-                  labelText: 'Apellido',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 16),
+                SaetaTextField(
+                  label: 'Apellido',
+                  controller: _lastnameController,
+                  validator: (value) => provider.validateName(value ?? ''),
                 ),
-                validator: (value) => provider.validateName(value ?? ''),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Teléfono',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 16),
+                SaetaTextField(
+                  label: 'Teléfono',
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  validator: (value) => provider.validatePhone(value ?? ''),
                 ),
-                validator: (value) => provider.validatePhone(value ?? ''),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Correo electrónico',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 16),
+                SaetaTextField(
+                  label: 'Correo electrónico',
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) => provider.validateEmail(value ?? ''),
                 ),
-                validator: (value) => provider.validateEmail(value ?? ''),
-              ),
-              const SizedBox(height: 32),
-              FilledButton(
-                onPressed: provider.isSaving ? null : _onSave,
-                child: provider.isSaving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text('Guardar cambios'),
-              ),
-            ],
+                const SizedBox(height: 32),
+                if (provider.isSaving)
+                  FilledButton.icon(
+                    onPressed: null,
+                    icon: const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    ),
+                    label: const Text('Guardando...'),
+                  )
+                else
+                  FilledButton(
+                    onPressed: _onSave,
+                    child: const Text('Guardar cambios'),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

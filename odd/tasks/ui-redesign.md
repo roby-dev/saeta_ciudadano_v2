@@ -49,7 +49,7 @@ grouping are derived from already-loaded alerts).
 - [x] U3 — Login + Register restyle, Spanish copy. (route: delegated direct)
 - [x] U4 — Emergencia view (blue header, SOS circle, incident grid, SMS row) + report confirmation sheet. (route: delegated direct)
 - [x] U5 — Mis alertas (summary counts, Active/History grouping, cards) + alert detail sheet (summary, map, tracking timeline, attention data, rating). (route: delegated direct)
-- [ ] U6 — Mi perfil (identity card, personal data, contacts, SMS switch, logout) + profile edit page. (route: delegated direct)
+- [x] U6 — Mi perfil (identity card, personal data, contacts, SMS switch, logout) + profile edit page. (route: delegated direct)
 
 ## Acceptance criteria
 - Every screen matches the canvas layout, tokens and Spanish copy; no
@@ -318,5 +318,94 @@ grouping are derived from already-loaded alerts).
   `test/features/alerts/presentation/widgets/alert_card_test.dart`,
   `test/features/alerts/presentation/widgets/alert_detail_sheet_test.dart`,
   `test/features/main/presentation/pages/alerts_view_test.dart`.
-  Commit: left for the user to record (see U6's commit, which will
-  record this one).
+  Commit: `87392d7`.
+- 2026-09-26: U6 done. Restyled `ProfileView`: solid primary header band
+  ("Mi perfil") overlapping by 48 (`Transform.translate`, same technique
+  as U3/U4's hero cards — here the translated subtree wraps the identity
+  card *and* everything below it, not just the card, so no gap opens up
+  between them; only U3/U4's usual harmless sliver of extra scroll space
+  at the very bottom) with a white radius-16 shadowed identity card (76px
+  `AvatarSection` avatar, name, "DNI {mono value}", and a new
+  `_AccountStatePill` private widget driven by a new pure, unit-tested
+  `accountStateLabel` helper — matches the exact `HABILITADO` value
+  case-insensitively rather than a substring check, since
+  `DESHABILITADO` itself contains `HABILITADO`; maps to
+  "Cuenta habilitada"/resuelta palette or "Cuenta deshabilitada"/
+  cancelada palette). "Datos personales" `SectionCard` (trailing
+  "Editar" `TextButton.icon`, unchanged navigation to `ProfileEditPage`)
+  and the existing `EmergencyContactsSection` embedded via a new
+  `_DataRow` private widget for the Correo electrónico/Teléfono rows.
+  Outlined "Cerrar sesión" button (lowercase "sesión", was "Cerrar
+  Sesión") using `AppColors.cancelada.border`/`.text` — the canvas's
+  rose `#FECDD3`/`#BE123C` are an exact hex match for the existing
+  cancelada state palette, reused rather than adding duplicate tokens
+  (same convention U4/U5 used); kept the confirmation dialog's own copy
+  ("Cerrar Sesión"/"¿Estás seguro..."/"Cancelar"/"Salir") byte-for-byte
+  unchanged per the task's spec, only swapped its icon/button colors
+  from bare `Colors.red` to `AppColors.danger`/`.cancelada.text` tokens.
+  Restyled `AvatarSection`: avatar 96px->76px, 2-letter initials (new
+  `userInitials` helper, same name+lastname convention as
+  `EmergencyView`'s private `_initials`) on an `AppColors.primary`
+  circle (was `colorScheme.primaryContainer`), camera badge 28px->36px
+  with a white 3px border and `AppColors.heading` background (was a
+  small primary-colored `CircleAvatar`) — camera/gallery picker
+  behavior, upload overlay and error/success snackbars unchanged.
+  Restyled `EmergencyContactsSection`: swapped its ad-hoc `Card` for
+  `SectionCard`, added the "N de 5 contactos" subtitle and swapped the
+  bare `IconButton` "add" trigger for a small outlined "Agregar" button
+  (primary border/text, disabled at 5 — same `canAddContact` gate as
+  before); each contact row now shows a 36px initials circle (new
+  `contactInitials` helper — first letter of the first 2 words of the
+  contact's free-text `name`, since (unlike `UserEntity`) it has no
+  separate lastname field) on `AppColors.primaryTint`, and the delete
+  `IconButton` gained a "Quitar contacto" tooltip (previously none).
+  SMS switch copy changed to match the canvas exactly: title "Enviar
+  SMS al reportar una alerta" (was "Enviar SMS a mis contactos de
+  emergencia") and the enabled-state subtitle "Se abrirá el mensajero
+  del teléfono con tus contactos." (was "...al enviar una alerta.");
+  kept the disabled-state helper text "Agrega al menos un contacto para
+  activar esta opción." (already matched) and the
+  disabled-when-no-contacts rule unchanged. `ProfileEditPage`: app bar
+  title lowercased to "Editar perfil" (was "Editar Perfil"), the form
+  wrapped in a white bordered radius-12 card, and its 4
+  `TextFormField`s replaced with `SaetaTextField` (from
+  `features/auth/presentation/widgets/`, the same "label above the
+  input" component U3 built for Login/Register — reused across features
+  the same way `ProfileView` already reuses `ProfileEditPage`/
+  `EmergencyContactsSection`/`AvatarSection` from other features, rather
+  than duplicating ~35 lines of layout) — validators, `Form`
+  key/validation and the `ProfileEditProvider` `save()` flow all
+  unchanged. Added the "Guardando..." saving state to the "Guardar
+  cambios" button (previously a bare spinner with no label) — the
+  labelled spinner-button pattern already used by
+  `AlertDetailSheet`'s "Enviar calificación"/"Guardando...".
+  TDD: RED observed (compile errors for every new
+  helper/file — `accountStateLabel`, `userInitials`,
+  `contactInitials` — plus behavioral failures for the new header/
+  identity-card/SMS-copy/"Cerrar sesión"/"Guardando..." copy and
+  layout) on all 7 new/extended test files before writing the sources;
+  GREEN after (26 new tests: `account_state_label` + `user_initials` +
+  `contact_initials` (3 pure-helper files) + `avatar_section` +
+  `emergency_contacts_section` + `profile_view` +
+  `profile_edit_page`). No blocking product decision arose; the "76px
+  avatar"/"36px camera button"/"account pill" design elements were all
+  literal enough to implement directly from the task's wording, so no
+  assumption-challenge or user question was needed. Checks: `flutter
+  test` 296/296 passed (270 baseline + 26 new); `flutter analyze` 0
+  issues; `flutter build apk --debug` succeeded (`app-debug.apk`, not
+  installed/run per instructions). Files:
+  `lib/features/profile/presentation/utils/account_state_label.dart`,
+  `lib/features/profile/presentation/utils/user_initials.dart`,
+  `lib/features/emergency_contacts/presentation/utils/contact_initials.dart`,
+  `lib/features/profile/presentation/widgets/avatar_section.dart`,
+  `lib/features/emergency_contacts/presentation/widgets/emergency_contacts_section.dart`,
+  `lib/features/main/presentation/pages/profile_view.dart`,
+  `lib/features/profile/presentation/pages/profile_edit_page.dart`, +
+  the matching 7 new test files under
+  `test/features/profile/presentation/utils/`,
+  `test/features/emergency_contacts/presentation/utils/`,
+  `test/features/profile/presentation/widgets/avatar_section_test.dart`,
+  `test/features/emergency_contacts/presentation/widgets/emergency_contacts_section_test.dart`,
+  `test/features/main/presentation/pages/profile_view_test.dart`,
+  `test/features/profile/presentation/pages/profile_edit_page_test.dart`.
+  Commit: left for the user to record.

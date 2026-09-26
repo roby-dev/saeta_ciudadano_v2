@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../service_locator.dart';
 import '../../../auth/domain/entities/user_entity.dart';
 import '../../domain/services/avatar_file_validator.dart';
@@ -7,8 +9,12 @@ import '../../domain/services/avatar_image_picker.dart';
 import '../../domain/services/avatar_url_builder.dart';
 import '../../domain/usecases/upload_avatar_usecase.dart';
 import '../providers/avatar_upload_provider.dart';
+import '../utils/user_initials.dart';
 
 enum _AvatarSource { camera, gallery }
+
+const double _avatarSize = 76;
+const double _cameraBadgeSize = 36;
 
 /// Profile avatar: shows the current photo (from `GET /v1/uploads/:photo`,
 /// via [AvatarUrlBuilder]) with a camera badge; tapping either opens a
@@ -27,7 +33,7 @@ class AvatarSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = this.user;
     if (user == null) {
-      return const _AvatarPlaceholder(initial: 'U');
+      return _AvatarPlaceholder(initial: userInitials(null));
     }
     return ChangeNotifierProvider<AvatarUploadProvider>(
       key: ValueKey('avatar-upload-${user.id}'),
@@ -92,30 +98,28 @@ class _AvatarWithBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final isUploading = context.watch<AvatarUploadProvider>().isUploading;
     final imageUrl = _urlBuilder.build(user.image);
-    final initial =
-        user.fullName.trim().isNotEmpty ? user.fullName.trim()[0].toUpperCase() : 'U';
+    final initial = userInitials(user);
 
     return GestureDetector(
       onTap: isUploading ? null : () => _openPicker(context),
       child: SizedBox(
-        width: 96,
-        height: 96,
+        width: _avatarSize,
+        height: _avatarSize,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
             ClipOval(
               child: SizedBox(
-                width: 96,
-                height: 96,
+                width: _avatarSize,
+                height: _avatarSize,
                 child: imageUrl == null
                     ? _AvatarPlaceholder(initial: initial)
                     : Image.network(
                         imageUrl,
-                        width: 96,
-                        height: 96,
+                        width: _avatarSize,
+                        height: _avatarSize,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) =>
                             _AvatarPlaceholder(initial: initial),
@@ -132,16 +136,20 @@ class _AvatarWithBadge extends StatelessWidget {
                 ),
               ),
             Positioned(
-              bottom: -2,
-              right: -2,
-              child: CircleAvatar(
-                radius: 14,
-                backgroundColor: theme.colorScheme.primary,
-                child: Icon(
-                  Icons.camera_alt,
-                  size: 14,
-                  color: theme.colorScheme.onPrimary,
+              bottom: -4,
+              right: -4,
+              child: Container(
+                width: _cameraBadgeSize,
+                height: _cameraBadgeSize,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.heading,
+                  border: Border.fromBorderSide(
+                    BorderSide(color: Colors.white, width: 3),
+                  ),
                 ),
+                child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
               ),
             ),
           ],
@@ -158,15 +166,21 @@ class _AvatarPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return CircleAvatar(
-      radius: 48,
-      backgroundColor: theme.colorScheme.primaryContainer,
+    return Container(
+      width: _avatarSize,
+      height: _avatarSize,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.primary,
+      ),
       child: Text(
         initial,
-        style: theme.textTheme.headlineMedium?.copyWith(
-          color: theme.colorScheme.onPrimaryContainer,
-          fontWeight: FontWeight.bold,
+        style: const TextStyle(
+          fontFamily: AppFonts.sans,
+          fontSize: 26,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
         ),
       ),
     );
