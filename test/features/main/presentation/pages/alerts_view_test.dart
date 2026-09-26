@@ -96,8 +96,7 @@ void main() {
   }
 
   group('AlertsView header', () {
-    testWidgets('shows the title and the live-update subtitle',
-        (tester) async {
+    testWidgets('shows the title and the live-update subtitle', (tester) async {
       when(() => getUserAlertsUseCase('u1'))
           .thenAnswer((_) async => Right(_noAlerts()));
       final provider = buildAlertsProvider();
@@ -106,6 +105,21 @@ void main() {
 
       expect(find.text('Mis alertas'), findsOneWidget);
       expect(find.text('Actualización en tiempo real'), findsOneWidget);
+    });
+
+    testWidgets('header starts below the system status bar', (tester) async {
+      when(() => getUserAlertsUseCase('u1'))
+          .thenAnswer((_) async => Right(_noAlerts()));
+      tester.view.padding = const FakeViewPadding(top: 300);
+      addTearDown(tester.view.resetPadding);
+
+      final provider = buildAlertsProvider();
+      await pumpView(tester, provider);
+      await tester.pumpAndSettle();
+
+      final titleTop = tester.getTopLeft(find.text('Mis alertas')).dy;
+      expect(
+          titleTop, greaterThanOrEqualTo(300 / tester.view.devicePixelRatio));
     });
 
     testWidgets('the refresh button calls refreshAlerts', (tester) async {
@@ -126,7 +140,8 @@ void main() {
   });
 
   group('AlertsView summary + grouping', () {
-    testWidgets('summary tiles show total/active/resolved counts and '
+    testWidgets(
+        'summary tiles show total/active/resolved counts and '
         'sections group alerts correctly', (tester) async {
       when(() => getUserAlertsUseCase('u1')).thenAnswer(
         (_) async => Right([

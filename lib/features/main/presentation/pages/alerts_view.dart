@@ -41,167 +41,173 @@ class _AlertsViewState extends State<AlertsView> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          _Header(onRefresh: () => provider.refreshAlerts()),
-          Expanded(
-            child: Builder(
-              builder: (context) {
-                if (isLoading) {
-                  return const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text(
-                          'Cargando historial de alertas...',
-                          style: TextStyle(
-                            fontFamily: AppFonts.sans,
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (errorMsg != null && alerts.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _Header(onRefresh: () => provider.refreshAlerts()),
+            Expanded(
+              child: Builder(
+                builder: (context) {
+                  if (isLoading) {
+                    return const Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.error_outline_rounded,
-                              size: 64, color: AppColors.danger),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'No se pudieron cargar las alertas',
-                            style: TextStyle(
-                              fontFamily: AppFonts.sans,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.heading,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
                           Text(
-                            errorMsg,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
+                            'Cargando historial de alertas...',
+                            style: TextStyle(
                               fontFamily: AppFonts.sans,
                               color: AppColors.muted,
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          FilledButton.icon(
-                            onPressed: _loadAlerts,
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('Reintentar'),
+                        ],
+                      ),
+                    );
+                  }
+
+                  if (errorMsg != null && alerts.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error_outline_rounded,
+                                size: 64, color: AppColors.danger),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'No se pudieron cargar las alertas',
+                              style: TextStyle(
+                                fontFamily: AppFonts.sans,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.heading,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              errorMsg,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontFamily: AppFonts.sans,
+                                color: AppColors.muted,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            FilledButton.icon(
+                              onPressed: _loadAlerts,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Reintentar'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (alerts.isEmpty) {
+                    return RefreshIndicator(
+                      onRefresh: () => provider.refreshAlerts(),
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.6,
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.notifications_none_rounded,
+                                    size: 80,
+                                    color: AppColors.primary
+                                        .withValues(alpha: 0.5),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'No tienes alertas registradas',
+                                    style: TextStyle(
+                                      fontFamily: AppFonts.sans,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.heading,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Las alertas que reportes o atiendas '
+                                    'aparecerán aquí con su estado en tiempo '
+                                    'real.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontFamily: AppFonts.sans,
+                                      color: AppColors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  FilledButton.icon(
+                                    onPressed: () {
+                                      context
+                                          .read<MainNavigationProvider>()
+                                          .setIndex(0);
+                                    },
+                                    icon: const Icon(Icons.emergency_outlined),
+                                    label: const Text('Reportar Emergencia'),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  );
-                }
+                    );
+                  }
 
-                if (alerts.isEmpty) {
+                  final summary = computeAlertsSummary(alerts);
+                  final grouped = groupAlerts(alerts);
+
                   return RefreshIndicator(
                     onRefresh: () => provider.refreshAlerts(),
                     child: ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(top: 16, bottom: 24),
                       children: [
-                        SizedBox(
-                          height: MediaQuery.of(context).size.height * 0.6,
-                          child: Padding(
-                            padding: const EdgeInsets.all(32),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.notifications_none_rounded,
-                                  size: 80,
-                                  color: AppColors.primary.withValues(alpha: 0.5),
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'No tienes alertas registradas',
-                                  style: TextStyle(
-                                    fontFamily: AppFonts.sans,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.heading,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Las alertas que reportes o atiendas '
-                                  'aparecerán aquí con su estado en tiempo '
-                                  'real.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontFamily: AppFonts.sans,
-                                    color: AppColors.muted,
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                                FilledButton.icon(
-                                  onPressed: () {
-                                    context
-                                        .read<MainNavigationProvider>()
-                                        .setIndex(0);
-                                  },
-                                  icon: const Icon(Icons.emergency_outlined),
-                                  label: const Text('Reportar Emergencia'),
-                                ),
-                              ],
+                        _SummaryRow(summary: summary),
+                        const SizedBox(height: 20),
+                        if (grouped.active.isNotEmpty) ...[
+                          const _SectionHeader(title: 'Activas'),
+                          for (final alert in grouped.active)
+                            AlertCard(
+                              key: ValueKey('alert-card-${alert.id}'),
+                              alert: alert,
+                              onTap: () =>
+                                  AlertDetailSheet.show(context, alert),
                             ),
-                          ),
-                        ),
+                          const SizedBox(height: 20),
+                        ],
+                        if (grouped.history.isNotEmpty) ...[
+                          const _SectionHeader(title: 'Historial'),
+                          for (final alert in grouped.history)
+                            AlertCard(
+                              key: ValueKey('alert-card-${alert.id}'),
+                              alert: alert,
+                              historical: true,
+                              onTap: () =>
+                                  AlertDetailSheet.show(context, alert),
+                            ),
+                        ],
                       ],
                     ),
                   );
-                }
-
-                final summary = computeAlertsSummary(alerts);
-                final grouped = groupAlerts(alerts);
-
-                return RefreshIndicator(
-                  onRefresh: () => provider.refreshAlerts(),
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(top: 16, bottom: 24),
-                    children: [
-                      _SummaryRow(summary: summary),
-                      const SizedBox(height: 20),
-                      if (grouped.active.isNotEmpty) ...[
-                        const _SectionHeader(title: 'Activas'),
-                        for (final alert in grouped.active)
-                          AlertCard(
-                            key: ValueKey('alert-card-${alert.id}'),
-                            alert: alert,
-                            onTap: () => AlertDetailSheet.show(context, alert),
-                          ),
-                        const SizedBox(height: 20),
-                      ],
-                      if (grouped.history.isNotEmpty) ...[
-                        const _SectionHeader(title: 'Historial'),
-                        for (final alert in grouped.history)
-                          AlertCard(
-                            key: ValueKey('alert-card-${alert.id}'),
-                            alert: alert,
-                            historical: true,
-                            onTap: () => AlertDetailSheet.show(context, alert),
-                          ),
-                      ],
-                    ],
-                  ),
-                );
-              },
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
