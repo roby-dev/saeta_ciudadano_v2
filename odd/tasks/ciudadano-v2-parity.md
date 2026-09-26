@@ -20,7 +20,7 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
 - Backend contract: `POST /v1/auth/refresh` body `{ refreshToken }` → `{ accessToken, refreshToken, user }`.
 - Backend realtime contract (`saeta-backend-v2/src/realtime/presentation/gateways/realtime.gateway.ts`, read-only, already merged on that repo's `main`): client connects with `auth: { token }` (access token only; a refresh token or missing token gets `client.disconnect(true)`); server auto-joins `user:{id}`/`role:{role}` rooms; citizen clients receive `updatedAlert` (payload: `AlertEntity`, only for alerts they own) and `disableUser` (payload: a plain string message, followed by a server-side forced disconnect); citizens never emit anything.
 - TDD: strict (source: user global config). Runner: `flutter test`.
-- Repository is git-backed on branch `feat/realtime-socket` (from `main`); one work-unit commit per task.
+- Repository is git-backed; T5–T7 live on branch `fix/realtime-reconnect-autologin` (from `main`); one work-unit commit per task.
 
 ## Tasks
 - [x] T1 — Token refresh interceptor (route: delegated direct — touches http_client, secure_storage, service_locator, 2 datasources, auth bloc/app navigation + tests)
@@ -820,4 +820,40 @@ untested stream-to-navigation/lifecycle glue (same convention flagged for
    these were picked as reasonable literal defaults; flagging in case the
    user wants them tuned or exposed as constructor parameters.
 
-### T6 — Auto-login on app start
+### T6 — Auto-login on app start (done)
+
+TDD: strict, source: user global config, runner: `flutter test`. The
+implementation and tests were written in an earlier session; the RED phase
+was not recorded in this document, so it is reported as unobserved rather
+than claimed. GREEN observed on 2026-09-25.
+
+Implementation:
+- `lib/features/auth/domain/usecases/get_current_user_usecase.dart` (new) —
+  thin pass-through to `AuthRepository.getCurrentUser()`.
+- `AuthRepository.getCurrentUser()` / `AuthRepositoryImpl` /
+  `AuthRemoteDataSource.getCurrentUser()` — `GET /v1/auth/me` through the
+  app's normal `Dio`, so `AuthInterceptor` refreshes an expired access token
+  transparently; a 401 maps to `UnauthorizedFailure`.
+- `AuthBloc._onSessionChecked` — requires rememberMe + token + userId, then
+  validates via `GetCurrentUserUseCase`. Success emits `AuthAuthenticated`
+  (navigates to main and connects the realtime service through the existing
+  listeners). `UnauthorizedFailure` clears the session; any other failure
+  emits `AuthUnauthenticated` without clearing it.
+- `lib/service_locator.dart` — registers `GetCurrentUserUseCase` and injects
+  it into `AuthBloc`.
+
+Tests added (`test/features/auth/`): 1 datasource, 4 repository, 5 bloc.
+
+Commands run (foreground, 2026-09-25):
+- `flutter test`: **104/104 passed, 0 failed**.
+- `flutter analyze`: **No issues found!**
+
+Review: RDD off (decided by global) — no native review.
+
+Not done / decision gaps:
+1. A non-401 failure on startup (network or server error) sends the user to
+   login but keeps the stored session, so the next launch retries it. An
+   offline start therefore still shows the login screen instead of an
+   offline main view.
+2. The splash/login navigation for the new authenticated path is not
+   covered by a widget test (same convention as `app.dart`).

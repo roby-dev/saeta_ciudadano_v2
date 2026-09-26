@@ -20,6 +20,7 @@ import 'features/alerts/presentation/providers/alerts_provider.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
 import 'features/auth/domain/repositories/auth_repository.dart';
+import 'features/auth/domain/usecases/get_current_user_usecase.dart';
 import 'features/auth/domain/usecases/login_usecase.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
 import 'features/emergency/data/datasources/emergency_remote_datasource.dart';
@@ -117,11 +118,15 @@ Future<void> setupServiceLocator() async {
   sl.registerLazySingleton<LoginUseCase>(
     () => LoginUseCase(sl<AuthRepository>()),
   );
+  sl.registerLazySingleton<GetCurrentUserUseCase>(
+    () => GetCurrentUserUseCase(sl<AuthRepository>()),
+  );
 
   // Auth — presentation
   sl.registerFactory<AuthBloc>(
     () => AuthBloc(
       loginUseCase: sl<LoginUseCase>(),
+      getCurrentUserUseCase: sl<GetCurrentUserUseCase>(),
       storage: sl<SecureStorage>(),
     ),
   );

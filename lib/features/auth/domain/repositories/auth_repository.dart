@@ -7,4 +7,8 @@ abstract interface class AuthRepository {
       login({required String email, required String password});
 
   Future<Either<Failure, String>> renewToken(String refreshToken);
+
+  /// Validates the stored session (`GET /v1/auth/me`) and returns the
+  /// current user profile on success.
+  Future<Either<Failure, UserEntity>> getCurrentUser();
 }
