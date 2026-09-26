@@ -25,6 +25,10 @@ class AppColors {
   /// Border for outlined ("secondary") buttons/controls.
   static const Color secondaryBorder = Color(0xFFCBD5E1);
 
+  /// Light blue-white text/subtitle on top of [primary]/[primaryDark]
+  /// backgrounds (auth header band, emergency header band).
+  static const Color onPrimaryMuted = Color(0xFFD6E6F7);
+
   // Danger (SOS / send alert)
   static const Color danger = Color(0xFFE11D48);
   static const Color dangerTint = Color(0xFFFFE4E6);

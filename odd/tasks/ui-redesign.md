@@ -46,7 +46,7 @@ grouping are derived from already-loaded alerts).
 ## Tasks
 - [x] U1 — Theme foundation: `AppColors`, `AppTheme` (ThemeData, text theme with bundled IBM Plex Sans/Mono, input/button/card/nav themes), wire into `app.dart`. (route: delegated direct)
 - [x] U2 — Shared widgets: `AlertStatePill` (state → colors), `SectionCard`, bottom navigation restyle. (route: delegated direct)
-- [ ] U3 — Login + Register restyle, Spanish copy. (route: delegated direct)
+- [x] U3 — Login + Register restyle, Spanish copy. (route: delegated direct)
 - [ ] U4 — Emergencia view (blue header, SOS circle, incident grid, SMS row) + report confirmation sheet. (route: delegated direct)
 - [ ] U5 — Mis alertas (summary counts, Active/History grouping, cards) + alert detail sheet (summary, map, tracking timeline, attention data, rating). (route: delegated direct)
 - [ ] U6 — Mi perfil (identity card, personal data, contacts, SMS switch, logout) + profile edit page. (route: delegated direct)
@@ -120,5 +120,49 @@ grouping are derived from already-loaded alerts).
   `test/features/alerts/presentation/widgets/alert_state_pill_test.dart`,
   `test/core/widgets/section_card_test.dart`,
   `test/features/main/presentation/pages/app_bottom_navigation_bar_test.dart`.
-  Commit: recorded in the next commit's trailer, or left for the user to
-  record — noted in the final report.
+  Commit: `88afb34`.
+- 2026-09-26: U3 done. Restyled `LoginPage`/`RegisterPage` to the canvas:
+  blue `#1976D2` header band (`SaetaLogo.brandMark` — new named
+  constructor added to the existing `saeta_logo.dart` rather than a
+  duplicate widget: white 56px rounded-14 icon tile + "SAETA" wordmark +
+  optional subtitle, white-on-primary) overlapped by a white radius-16
+  hero card (`Transform.translate` paint-only shift, since
+  `Container.margin` asserts non-negative insets — leaves a harmless
+  sliver of extra scrollable space below the card, no test/behavior
+  impact). Restyled `saeta_text_field.dart` (label rendered above the
+  input as its own 13px semibold `Text`, not `InputDecoration.labelText`;
+  `prefixIcon` now optional; added `onChanged`) and reused it for
+  register's DNI field (dropped the separate `_DniField` private widget).
+  Added `AppColors.onPrimaryMuted` (`#D6E6F7`, header subtitle). All
+  copy translated to Spanish, including validation messages (e.g. "El
+  correo es obligatorio", "Ingresa un correo válido", "La contraseña es
+  obligatoria", "Las contraseñas no coinciden") and the error dialog's
+  dismiss button ("Cerrar", matching the existing convention in
+  `profile_view.dart`/`emergency_view.dart` — was "OK"). Register's old
+  outlined "Cancel" button was replaced by the canvas's "¿Ya tienes
+  cuenta? Inicia sesión" link (same `context.pop()` behavior). Kept all
+  bloc events, validators' rules (email format, DNI 8 digits, phone 9
+  digits starting with 9, password confirmation), remember-me, DNI
+  RENIEC auto-fill lookup and navigation unchanged. TDD: RED observed
+  (compile errors — `Member not found: 'SaetaLogo.brandMark'`,
+  `AppColors.onPrimaryMuted`, `SaetaTextField`'s now-required
+  `prefixIcon`/missing `onChanged` — plus 11-14 runtime failures for the
+  still-English copy) on all 4 new test files before writing the
+  sources; GREEN after (19/19 new tests: 3 `SaetaLogo` + 4
+  `SaetaTextField` + 6 `LoginPage` + 6 `RegisterPage`). One mid-GREEN
+  fix: `Container.margin` doesn't accept negative `EdgeInsets`
+  (assertion failure), switched the overlap to `Transform.translate`;
+  and widget tests needed `tester.ensureVisible(...)` before tapping the
+  submit buttons (off-screen in the default 800x600 test viewport inside
+  the `SingleChildScrollView`). Checks: `flutter test` 217/217 passed
+  (198 baseline + 19 new); `flutter analyze` 0 issues (fixed 1 unused
+  test import). Files: `lib/core/theme/app_colors.dart`,
+  `lib/features/auth/presentation/pages/login_page.dart`,
+  `lib/features/auth/presentation/widgets/saeta_logo.dart`,
+  `lib/features/auth/presentation/widgets/saeta_text_field.dart`,
+  `lib/features/register/presentation/pages/register_page.dart`,
+  `test/features/auth/presentation/widgets/saeta_logo_test.dart`,
+  `test/features/auth/presentation/widgets/saeta_text_field_test.dart`,
+  `test/features/auth/presentation/pages/login_page_test.dart`,
+  `test/features/register/presentation/pages/register_page_test.dart`.
+  Commit: left for the user to record (noted in the final report).
