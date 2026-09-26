@@ -48,7 +48,7 @@ grouping are derived from already-loaded alerts).
 - [x] U2 — Shared widgets: `AlertStatePill` (state → colors), `SectionCard`, bottom navigation restyle. (route: delegated direct)
 - [x] U3 — Login + Register restyle, Spanish copy. (route: delegated direct)
 - [x] U4 — Emergencia view (blue header, SOS circle, incident grid, SMS row) + report confirmation sheet. (route: delegated direct)
-- [ ] U5 — Mis alertas (summary counts, Active/History grouping, cards) + alert detail sheet (summary, map, tracking timeline, attention data, rating). (route: delegated direct)
+- [x] U5 — Mis alertas (summary counts, Active/History grouping, cards) + alert detail sheet (summary, map, tracking timeline, attention data, rating). (route: delegated direct)
 - [ ] U6 — Mi perfil (identity card, personal data, contacts, SMS switch, logout) + profile edit page. (route: delegated direct)
 
 ## Acceptance criteria
@@ -217,4 +217,106 @@ grouping are derived from already-loaded alerts).
   `lib/features/main/presentation/widgets/sos_button.dart`,
   `lib/features/main/presentation/widgets/emergency_type_card.dart`,
   `test/features/main/presentation/pages/emergency_view_test.dart`.
-  Commit: left for the user to record.
+  Commit: `38ebda9`.
+- 2026-09-26: U5 done. Restyled `AlertsView`: solid primary header band
+  ("Mis alertas" + "Actualización en tiempo real" subtitle with a 7px
+  `AppColors.liveDot` — new token, `#34D399`, distinct from the resuelta
+  state's emerald-500 dot — + white refresh `IconButton`, same
+  `provider.refreshAlerts()` behavior), a 3-tile summary row (Total/
+  Activas/Resueltas, white bordered radius-10 tiles) and "Activas"/
+  "Historial" sections (hidden when empty). Added 5 new pure,
+  unit-tested presentation helpers under
+  `lib/features/alerts/presentation/utils/`: `alerts_summary.dart`
+  (`computeAlertsSummary` — total/active(pending+in-process)/resolved),
+  `alerts_grouping.dart` (`groupAlerts` — Activas/Historial, preserves
+  order), `alert_short_id.dart` (`alertShortId` — last 6 chars
+  uppercased), `alert_timeline.dart` (`alertTimelineSteps` — the 3
+  Seguimiento steps' completed/date/emerald state) and
+  `alert_date_formatter.dart` (`formatAlertDate` — "26 sep 2026 · 14:32";
+  no `intl` dependency added, a small hand-rolled Spanish-month-abbrev
+  formatter was enough and keeps tests deterministic without loading
+  locale data; reads the parsed `DateTime`'s fields directly, no
+  `toLocal()`, since the app has no timezone handling anywhere else).
+  Extracted `alert_type_icon.dart` (`alertTypeIcon`) from `AlertCard`'s
+  private method so the detail sheet's summary card reuses the exact
+  same type->icon mapping. Restyled `AlertCard` (white radius-12 card,
+  42px rounded-10 type icon tile, 15px semibold type name, 12px muted
+  formatted date, trailing `AlertStatePill`) — dropped its old
+  "Atendido por"/inline star-rating extra rows (now exclusively in the
+  detail sheet) to match the canvas's minimal list-item design; added a
+  `historical` bool (default false) that switches the type tile between
+  `AppColors.primaryTint`/`.primary` (active) and `AppColors.neutral`'s
+  background/text (history) — the canvas's slate-100/slate-600 are an
+  exact hex match for the existing `neutral` state palette, reused
+  rather than adding duplicate tokens (same convention U4 used for its
+  SMS row). Rewrote `AlertDetailSheet` top to bottom per spec: summary
+  `SectionCard` (type icon tile, 17px semibold name, mono `#XXXXXX`
+  short id when the alert has an id, `AlertStatePill`, divider,
+  `AlertMapCard`), "Seguimiento" timeline `SectionCard` (20px circles —
+  filled primary check when completed, emerald for the final
+  resolved/cancelled step, hollow slate + "Pendiente" otherwise — joined
+  by a 2px line), "Datos de la atención" `SectionCard` (Personal que
+  atendió/Teléfono de contacto mono + 44px tinted call button only when
+  each field is present, Ubicación GPS mono always), and the existing
+  rating section restyled as a `SectionCard` (44px star targets, filled
+  `AppColors.pendiente.dot` amber / empty `AppColors.secondaryBorder`
+  slate — both exact hex matches reused, not new tokens; "Comentario
+  (opcional)" label copy change, kept the existing hint; "Enviar
+  calificación" button copy change, kept the existing "Guardando..."
+  state, show/hide-when-resolved condition and thanks/error
+  `SnackBar`s unchanged). No "Personal de seguridad se encuentra
+  coordinando..." banner: doesn't exist in the current detail sheet (it
+  only lives in `EmergencyView`'s post-send dialog), so there was
+  nothing to restyle — omitted per the task's own "if it exists"
+  wording. Added the `tel:` call button via a new
+  `TelUriBuilder`(`lib/features/alerts/presentation/utils/
+  tel_uri_builder.dart`, unit-tested) + `url_launcher`'s `launchUrl`,
+  best-effort try/catch, same convention as `AlertMapCard`'s existing
+  "Abrir en Google Maps" launch (not itself unit-tested, consistent
+  with that existing precedent — no url_launcher platform-channel
+  mocking exists in this suite). Restyled `AlertMapCard`'s own "Abrir en
+  Google Maps" button from a right-aligned `Align` to a full-width
+  `SizedBox` (one-line change; its "only testable path without a real
+  `GoogleMap` platform view" per the existing test is the placeholder,
+  where the button never renders, so the full-width layout itself is
+  unverified by an automated test — same known gap as the rest of the
+  map widget). Test alert fixtures use `latitude/longitude: 0` (the
+  placeholder path) throughout, consistent with the existing
+  `alert_map_card_test.dart` precedent, since no `GoogleMap` platform
+  mocking exists in this suite. TDD: RED observed (compile errors for
+  every new helper/param — `historical`, `AppColors.liveDot`, the 5 new
+  util files — plus behavioral failures for the new header/summary/
+  grouping/card/sheet copy and layout) on all 8 new/extended test files
+  before writing the sources; GREEN after (42 new tests: 4
+  `alerts_summary`/`alerts_grouping`/`alert_short_id`/`alert_timeline`/
+  `alert_date_formatter` util files + `tel_uri_builder` + `alert_card`
+  + `alert_detail_sheet` + `alerts_view` + 1 `AppColors.liveDot` case).
+  Two mid-GREEN fixes: (1) `alertShortId`'s own test had a miscounted
+  expected value (`abcd` vs the correct last-6 `45abcd`) — fixed the
+  test, not the source; (2) `const Right(<CitizenAlertEntity>[])` in
+  `alerts_view_test.dart` (to satisfy `flutter analyze`'s
+  `prefer_const_constructors`) makes the list unmodifiable, and
+  `AlertsProvider.loadAlerts` sorts in place — same trap already
+  documented in `alerts_provider_test.dart`'s `_oneAlertResult`; fixed
+  with an equivalent `_noAlerts()` helper returning a fresh growable
+  list each call. Checks: `flutter test` 270/270 passed (228 baseline +
+  42 new); `flutter analyze` 0 issues. Files:
+  `lib/core/theme/app_colors.dart`,
+  `lib/features/alerts/presentation/utils/alert_date_formatter.dart`,
+  `lib/features/alerts/presentation/utils/alerts_summary.dart`,
+  `lib/features/alerts/presentation/utils/alerts_grouping.dart`,
+  `lib/features/alerts/presentation/utils/alert_short_id.dart`,
+  `lib/features/alerts/presentation/utils/alert_timeline.dart`,
+  `lib/features/alerts/presentation/utils/tel_uri_builder.dart`,
+  `lib/features/alerts/presentation/widgets/alert_type_icon.dart`,
+  `lib/features/alerts/presentation/widgets/alert_card.dart`,
+  `lib/features/alerts/presentation/widgets/alert_detail_sheet.dart`,
+  `lib/features/alerts/presentation/widgets/alert_map_card.dart`,
+  `lib/features/main/presentation/pages/alerts_view.dart`,
+  `test/core/theme/app_colors_test.dart`, + 8 new test files under
+  `test/features/alerts/presentation/utils/`,
+  `test/features/alerts/presentation/widgets/alert_card_test.dart`,
+  `test/features/alerts/presentation/widgets/alert_detail_sheet_test.dart`,
+  `test/features/main/presentation/pages/alerts_view_test.dart`.
+  Commit: left for the user to record (see U6's commit, which will
+  record this one).

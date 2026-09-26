@@ -65,6 +65,11 @@ void main() {
       );
     });
 
+    test('liveDot (Mis alertas header "live" indicator) matches the canvas',
+        () {
+      expect(AppColors.liveDot, const Color(0xFF34D399));
+    });
+
     test('the neutral/unknown-state palette is a distinct slate style', () {
       const neutral = AppColors.neutral;
       expect(neutral, isNot(AppColors.pendiente));

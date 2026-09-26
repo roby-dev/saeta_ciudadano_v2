@@ -81,8 +81,8 @@ class _AlertMapCardState extends State<AlertMapCard> {
           ),
         ),
         if (position != null)
-          Align(
-            alignment: Alignment.centerRight,
+          SizedBox(
+            width: double.infinity,
             child: TextButton.icon(
               onPressed: _openInGoogleMaps,
               icon: const Icon(Icons.map_outlined, size: 18),

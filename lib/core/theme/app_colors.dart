@@ -29,6 +29,11 @@ class AppColors {
   /// backgrounds (auth header band, emergency header band).
   static const Color onPrimaryMuted = Color(0xFFD6E6F7);
 
+  /// Small "live" status dot (Mis alertas header subtitle "Actualización en
+  /// tiempo real") — a distinct emerald-400, not the [resuelta] state's
+  /// emerald-500 [AlertStatePalette.dot].
+  static const Color liveDot = Color(0xFF34D399);
+
   // Danger (SOS / send alert)
   static const Color danger = Color(0xFFE11D48);
   static const Color dangerTint = Color(0xFFFFE4E6);
