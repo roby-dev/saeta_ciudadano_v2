@@ -82,7 +82,10 @@ class AppTheme {
       borderSide: const BorderSide(color: AppColors.secondaryBorder),
     );
 
-    const buttonMinimumSize = Size.fromHeight(AppDimens.controlHeight);
+    // Finite width on purpose: `Size.fromHeight` means infinite width, which
+    // breaks any button laid out inside a Row. Full-width buttons opt in via
+    // their parent (stretch Column or SizedBox(width: double.infinity)).
+    const buttonMinimumSize = Size(64, AppDimens.controlHeight);
     final buttonShape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(AppRadii.control),
     );

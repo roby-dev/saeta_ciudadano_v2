@@ -409,3 +409,13 @@ grouping are derived from already-loaded alerts).
   `test/features/main/presentation/pages/profile_view_test.dart`,
   `test/features/profile/presentation/pages/profile_edit_page_test.dart`.
   Commit: `d2dd111`.
+- 2026-09-26: device bugfix. On the emulator the Perfil tab threw
+  "BoxConstraints forces an infinite width" (TextButton in SectionCard's
+  trailing Row). Root cause: `AppTheme` set every button's `minimumSize` to
+  `Size.fromHeight(48)` (infinite width); widget tests missed it because they
+  pump screens without `AppTheme.light`. Fix: `Size(64, 48)`; full-width
+  buttons already get their width from a stretch Column or
+  `SizedBox(width: double.infinity)` (verified per call site). TDD: RED
+  observed (new regression test in `test/core/theme/app_theme_test.dart`
+  failed with the same infinite-width error), GREEN after. Checks:
+  `flutter test` 297/297, `flutter analyze` 0 issues.

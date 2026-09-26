@@ -74,4 +74,31 @@ void main() {
       expect(theme.navigationBarTheme.backgroundColor, AppColors.surface);
     });
   });
+
+  group('AppTheme.light button sizing', () {
+    // Regression: a theme-level `minimumSize` with infinite width made any
+    // button placed inside a Row (e.g. a SectionCard trailing action) throw
+    // "BoxConstraints forces an infinite width" on device.
+    testWidgets('every button type lays out inside a Row', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
+            body: Row(
+              children: [
+                TextButton(onPressed: () {}, child: const Text('Text')),
+                OutlinedButton(onPressed: () {}, child: const Text('Out')),
+                FilledButton(onPressed: () {}, child: const Text('Fill')),
+                ElevatedButton(onPressed: () {}, child: const Text('Elev')),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+      final height = tester.getSize(find.byType(TextButton)).height;
+      expect(height, greaterThanOrEqualTo(AppDimens.controlHeight));
+    });
+  });
 }
