@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../emergency_contacts/presentation/widgets/emergency_contacts_section.dart';
+import '../../../profile/presentation/pages/profile_edit_page.dart';
 import '../providers/main_navigation_provider.dart';
 
 class ProfileView extends StatelessWidget {
@@ -92,7 +93,31 @@ class ProfileView extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: user == null
+                  ? null
+                  : () {
+                      // Captured here (still inside MainPage's
+                      // MultiProvider) rather than inside ProfileEditPage
+                      // itself, since the pushed route sits above that
+                      // MultiProvider in the widget tree — see
+                      // ProfileEditPage's doc comment.
+                      final setUser =
+                          context.read<MainNavigationProvider>().setUser;
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ProfileEditPage(
+                            user: user,
+                            onUpdated: setUser,
+                          ),
+                        ),
+                      );
+                    },
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar perfil'),
+            ),
+            const SizedBox(height: 12),
 
             // User Info Cards
             Card(

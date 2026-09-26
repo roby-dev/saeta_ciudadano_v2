@@ -13,7 +13,9 @@ Bring the Flutter citizen app (`saeta_ciudadano_v2`) to functional parity with t
 - T3: Socket.IO client (real-time `updatedAlert` / `disableUser` from the backend gateway).
 - T4: Reset the local "send SMS on alert" preference at every end-of-session path.
 
-Out of scope: profile edit, photo upload, maps (tracked as later gaps).
+- T8/T9 (added 2026-09-25, user-authorized): profile edit and avatar upload, on stacked branch `feat/profile-edit-avatar` (from `fix/realtime-reconnect-autologin`).
+
+Out of scope: maps in alert detail, change password (tracked as later gaps).
 
 ## Constraints
 - Clean architecture per feature (data/domain/presentation), get_it DI, dartz Either.
@@ -30,6 +32,8 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
 - [x] T5 — Socket reconnection with exponential backoff + auth-refresh-once, replacing T3's "exactly one retry then dead until restart" policy (route: delegated direct — `core/realtime/realtime_service_impl.dart` + `realtime_service.dart` interface, new `core/network/token_refresher.dart` extracted from `AuthInterceptor`, `AuthInterceptor` refactor to use it, `service_locator`, `app.dart` (foreground-resume hook), `pubspec.yaml` (`fake_async` dev dep) + tests).
 - [x] T6 — Auto-login on app start via `GET /v1/auth/me` (route: delegated direct — `AuthBloc._onSessionChecked`, new `GetCurrentUserUseCase` + `AuthRepository.getCurrentUser` + `AuthRemoteDataSource.getCurrentUser`, `service_locator` + tests). Commit `a836a74`.
 - [x] T7 — Listen to the backend's new `updatedProfile` socket event and live-update the profile view and emergency contacts (route: delegated direct — writer trigger: `RealtimeService` interface + impl, `MainNavigationProvider`, `EmergencyContactsProvider`, `service_locator`/`main_page` wiring + tests).
+- [x] T8 — Edit own profile (name, lastname, phone, email) via `PATCH /v1/users/:id` (route: delegated direct — new `profile` feature data/domain/presentation, edit form UI, `service_locator` + tests).
+- [ ] T9 — Avatar upload from camera or gallery via `PUT /v1/uploads/:id` and display via `GET /v1/uploads/:photo` (route: delegated direct — `image_picker` dependency, platform permissions, profile feature extension, UI + tests).
 
 ## Acceptance criteria
 - T1: a 401 on an authenticated request triggers exactly one refresh (concurrent 401s share it), tokens are persisted, the original request is retried once; a failed refresh clears the session and returns the user to login. Refresh endpoint itself never loops.
@@ -119,6 +123,22 @@ Out of scope: profile edit, photo upload, maps (tracked as later gaps).
   untouched) without a REST call, and forces the SMS-on-alert preference off
   when the list becomes empty. Both providers cancel their subscription in
   `dispose()`.
+
+- T8: backend contract from `saeta-backend-v2/odd/tasks/realtime-profile-sync.md`.
+  `PATCH /v1/users/:id` with only `{ name?, lastname?, phone?, email? }` (never
+  `role`/`statusAccount`: `role` → 400). Response `{ ok, user }`. 409 on
+  duplicate email/phone surfaces the backend message. Client-side validation
+  before sending: non-empty name/lastname, phone normalizable to 9 digits
+  (reuse `PeruvianPhoneNormalizer`), valid email format. On success the
+  profile view shows the new data immediately (from the response, not
+  waiting for the `updatedProfile` socket event, which T7 also handles).
+  DNI is read-only.
+- T9: `PUT /v1/uploads/:id` multipart field `image` (<=5MB,
+  png/jpg/jpeg/gif/webp), response `{ ok, user }`. Picker offers camera or
+  gallery; images are compressed/resized client-side to stay under 5MB.
+  The avatar renders from `GET /v1/uploads/:photo` using the user's `image`
+  file id, with a placeholder when empty or on load error. Upload failure
+  never loses the current avatar.
 
 ## Decisions (T3)
 - **`updatedAlert` payload handling**: the backend's `emitAlertUpdated`
@@ -1041,3 +1061,202 @@ across `lib/`).
    `emergency_contacts_section.dart` without dedicated widget tests (T2
    flagged the same gap); both providers' `ChangeNotifier`/`notifyListeners`
    behavior is fully unit-tested instead.
+
+### T8 — Profile edit (done)
+
+Route: delegated direct (writer trigger — new `profile` feature across
+data/domain/presentation, `profile_view.dart` entry point, `service_locator`
++ tests). Executed directly by the writer agent per explicit instruction not
+to spawn subagents this session.
+
+TDD: strict, source: user global config, runner: `flutter test`. Every unit
+was written test-first. RED observed first (all compile errors, same
+convention as every prior task):
+
+- `test/features/profile/data/profile_remote_datasource_test.dart`: `Error
+  when reading 'lib/features/profile/data/datasources/profile_remote_datasource.dart':
+  El sistema no puede encontrar la ruta especificada` (file didn't exist).
+- `test/features/profile/data/profile_repository_impl_test.dart`: same
+  pattern, `ProfileRepositoryImpl`/`ProfileRemoteDataSource` not found.
+- `test/features/profile/presentation/profile_edit_provider_test.dart`:
+  `Type 'UpdateProfileUseCase' not found.` / `'ProfileEditProvider' isn't a
+  type.` / `The method 'call' isn't defined for the type
+  'MockUpdateProfileUseCase'` (11 call sites).
+
+Then implemented to GREEN, no refactor step needed beyond the clean
+implementation. Suite grew from 115 tests (T7 baseline) to **132 tests, all
+passing** (2 new `ProfileRemoteDataSourceImpl`, 4 new `ProfileRepositoryImpl`,
+11 new `ProfileEditProvider`).
+
+#### Backend contract (read-only, `saeta-backend-v2/odd/tasks/realtime-profile-sync.md`)
+
+Confirmed from the "Citizen profile API contract" table and
+`src/users/presentation/dto/update-user.dto.ts`: `PATCH /v1/users/:id` body
+`{ name?, lastname?, phone?, email?, ... }`, response `{ ok, user }`. `phone`
+must match `/^\d{9}$/` server-side (`Matches` decorator) — confirms the
+client must normalize before sending, not just validate length loosely.
+`role` isn't a DTO field at all (global `forbidNonWhitelisted` pipe → 400 if
+sent); `statusAccount` is a declared field but silently dropped server-side
+unless the caller is privileged — this client never sends either. Duplicate
+`email`/`phone` → 409 with a backend message, surfaced as-is per T2's
+`_extractErrorMessage` pattern.
+
+#### New feature: `lib/features/profile/`
+
+Domain:
+- `domain/repositories/profile_repository.dart` — `ProfileRepository`,
+  single `Either`-based `updateProfile({userId, name, lastname, phone,
+  email})` (all required — this client always sends the full set of four
+  editable fields, per the task's "only changed fields is fine too, not
+  mandatory" wording; simpler than tracking a dirty-field diff).
+- `domain/usecases/update_profile_usecase.dart` — thin pass-through, same
+  style as `SaveEmergencyContactsUseCase`.
+
+Data:
+- `data/datasources/profile_remote_datasource.dart` —
+  `ProfileRemoteDataSourceImpl.updateProfile` PATCHes `/v1/users/:id` with
+  exactly `{name, lastname, phone, email}` and parses `response.data['user']`
+  via the existing `UserModel.fromJson` (no new model needed — `UserModel`
+  already covers every field this response can carry, reused as-is like T7's
+  `MainNavigationProvider` reuse). 2 tests (mocked `Dio`): exact
+  path/body/parsing; a `captureAny` assertion that the sent body never
+  contains `role`/`statusAccount` keys.
+- `data/repositories/profile_repository_impl.dart` — same `DioException` →
+  `Failure` mapping pattern as `EmergencyContactsRepositoryImpl`
+  (`NetworkFailure` on connection errors/timeouts, `ServerFailure` with the
+  backend's `message` otherwise, `UnknownFailure` on anything else). 4 tests:
+  success maps to the entity; `NetworkFailure` on `connectionError`;
+  `ServerFailure` surfacing the backend's exact 409 duplicate-email message;
+  `UnknownFailure` on a non-`DioException` error.
+
+Presentation:
+- `presentation/providers/profile_edit_provider.dart` —
+  `ProfileEditProvider extends ChangeNotifier`. Exposes `validateName`,
+  `validatePhone`, `validateEmail` as public methods meant to be wired
+  directly as each `TextFormField`'s `validator` (per-field messages, not one
+  combined form-level error) — `validatePhone` delegates to the existing
+  `PeruvianPhoneNormalizer` (reused from `emergency_contacts`, no
+  duplication) and rejects anything that doesn't normalize to a 9-digit
+  number; `validateEmail` uses a small `RegExp`
+  (`^[^@\s]+@[^@\s]+\.[^@\s]+$`) — deliberately simple (no full RFC 5322
+  validation), matching the backend's own `class-validator` `@IsEmail()`
+  strictness level, not a stricter client-side gate.
+  `save({name, lastname, phone, email})` re-validates all four fields
+  defensively (so a caller that skips the `Form`'s own validation, e.g. a
+  future test or a different UI, still can't send invalid data), sends the
+  **normalized** phone (never the raw typed value) to
+  `UpdateProfileUseCase`, and on success replaces `currentUser` and calls the
+  optional `onUpdated` callback — see the "wiring" decision below. On
+  failure, `currentUser` is left untouched and `errorMessage` carries the
+  backend's message verbatim (including the 409 duplicate-email/phone case).
+  `isSaving` is `true` only while the use case call is in flight. 3 field
+  validation tests + 11 `save` tests (4 per-field-invalid rejections without
+  calling the use case, normalized-phone-sent assertion, success updates
+  state + callback + clears error/saving, failure keeps old user + surfaces
+  message + clears saving, `isSaving` true mid-flight via a manually
+  completed `Completer`).
+- `presentation/pages/profile_edit_page.dart` — `ProfileEditPage` (takes
+  `user` + an optional `onUpdated` callback) wraps a private
+  `_ProfileEditForm` in its own `ChangeNotifierProvider<ProfileEditProvider>`
+  constructed from `sl<UpdateProfileUseCase>()` +
+  `sl<PeruvianPhoneNormalizer>()` (already registered by T2) + the passed-in
+  `user`/`onUpdated` — same convention as `MainNavigationProvider` being
+  constructed directly with runtime args in `MainPage` rather than via a
+  get_it factory, since this provider needs per-instance data a factory
+  can't supply. The form: four `TextFormField`s (name, lastname, phone,
+  email — DNI is not shown, per "DNI stays read-only"), pre-filled from
+  `user`, each wired to the matching `provider.validateXxx` (wrapped
+  `(v) => provider.validateXxx(v ?? '')` for `FormFieldValidator<String>`'s
+  nullable signature), a `FilledButton` disabled (`onPressed: null`) while
+  `provider.isSaving`, showing a small `CircularProgressIndicator` in that
+  state. On save: a success `SnackBar` + `Navigator.pop`; a failure shows
+  `provider.errorMessage` in a `SnackBar` (inline `Form` validation already
+  covers the four field-level cases before the use case is even called). No
+  dedicated widget test — consistent with this codebase's existing
+  convention of leaving `profile_view.dart`/`emergency_contacts_section.dart`
+  without one (T2/T7 already flagged and accepted this gap for view-layer
+  files); fully covered indirectly via `ProfileEditProvider`'s exhaustive
+  unit tests.
+
+#### Wiring decision: `onUpdated` callback instead of `ProfileEditPage` reading `MainNavigationProvider` itself
+
+`ProfileView`'s "Editar perfil" `TextButton.icon` opens `ProfileEditPage` via
+`Navigator.of(context).push(MaterialPageRoute(...))` on the **app-level**
+Navigator (the one `MaterialApp.router`/go_router owns), not a
+`MainPage`-local one — `MainPage` never wraps its `IndexedStack` children in
+their own `Navigator`. That means a page reached via this `push` sits
+**above** `MainPage`'s `MultiProvider` in the widget tree, so a
+`context.read<MainNavigationProvider>()` call *inside* `ProfileEditPage`
+would throw `ProviderNotFoundException` at runtime (this was caught before
+writing any test — a build-time constraint, not something TDD against a
+mocked provider would have surfaced, since the provider tests never
+instantiate a real `MainNavigationProvider`+widget tree together). The fix:
+`profile_view.dart` resolves `context.read<MainNavigationProvider>().setUser`
+*before* calling `push` (still inside the `MultiProvider`'s subtree) and
+passes that bound function down as `ProfileEditPage.onUpdated` /
+`ProfileEditProvider.onUpdated`, which fires on a successful save so the
+profile view reflects the new data immediately, per the acceptance
+criterion — the `updatedProfile` socket event (T7) will also arrive and
+re-apply the same data via `MainNavigationProvider._handleUpdatedProfile`,
+which is idempotent (same id, same fields) and therefore harmless.
+
+#### Changed: `lib/features/main/presentation/pages/profile_view.dart`
+
+Added a `TextButton.icon` ("Editar perfil") below the email, above the
+existing info card; disabled (`onPressed: null`) when there's no
+`currentUser` yet. On tap, captures `MainNavigationProvider.setUser` and
+pushes `ProfileEditPage(user: user, onUpdated: setUser)`.
+
+#### Changed: `lib/service_locator.dart`
+
+Registers `ProfileRemoteDataSource` → `ProfileRemoteDataSourceImpl`,
+`ProfileRepository` → `ProfileRepositoryImpl`, `UpdateProfileUseCase` (all
+lazy singletons, same pattern as the `emergency_contacts` registrations).
+`ProfileEditProvider` itself is **not** registered here — see the "wiring
+decision" above and the existing `MainNavigationProvider` precedent for why
+a provider needing runtime-only constructor args (`user`, `onUpdated`) is
+built directly at its usage site instead of via a get_it factory.
+
+#### Commands run (foreground)
+
+- `flutter test`: **132/132 passed, 0 failed** (115 T1–T7 baseline + 2
+  datasource + 4 repository + 11 provider).
+- `flutter analyze`: **No issues found!** (after fixing 4
+  `argument_type_not_assignable` errors — `TextFormField.validator` expects
+  `FormFieldValidator<String>` i.e. `String? Function(String?)`, but
+  `ProfileEditProvider`'s validators are deliberately non-nullable
+  `String? Function(String)` for direct unit-testability without a `?? ''`
+  at every call site; the four call sites in `profile_edit_page.dart` wrap
+  them as `(value) => provider.validateXxx(value ?? '')` instead).
+
+#### Not done / decision gaps (do not invent — flagging for the user)
+
+1. **Not manually verified against a live server** (no integration/E2E
+   test, consistent with T1–T7) — the exact `PATCH /v1/users/:id` request/
+   response shape and the 409 duplicate-email/phone behavior were confirmed
+   by reading the backend's DTO/contract table, not by observing a real
+   conflicting update against the deployed backend.
+2. **This client always sends all four fields** (`name`, `lastname`,
+   `phone`, `email`) rather than only the ones the user actually changed —
+   the task explicitly allowed either approach ("only changed fields is
+   fine too"); always-send-all was chosen for simplicity (no dirty-field
+   tracking) and is harmless given the backend's contract (unsent fields are
+   simply left as `undefined` in a partial DTO either way; sending the
+   current unchanged value round-trips it back unchanged).
+3. **No widget test for `ProfileEditPage`/`ProfileView`'s new "Editar
+   perfil" button** — consistent with this codebase's existing convention
+   (T2/T7 flagged the same gap for `profile_view.dart`/
+   `emergency_contacts_section.dart`); the `ProfileEditPage → Navigator.push
+   → ProviderNotFoundException` risk described above was instead caught by
+   reasoning about the widget tree before writing the page, not by an
+   automated test — a widget test pushing `ProfileEditPage` from within a
+   `MainPage`-shaped tree would have caught it mechanically and is a
+   reasonable follow-up if the user wants that guarantee codified.
+4. **Email validation is a simple regex, not a full RFC 5322 parser** —
+   matches the backend's own `class-validator` `@IsEmail()` strictness
+   level (also not fully RFC-compliant in practice), so client/server
+   rejection behavior should stay aligned for the common cases, but an
+   edge-case address accepted by one and rejected by the other is possible
+   in theory.
+5. **T9 (avatar upload) is explicitly out of scope for this task** and was
+   not started, per instruction.

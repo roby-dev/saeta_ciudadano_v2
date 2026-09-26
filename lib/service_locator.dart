@@ -41,6 +41,10 @@ import 'features/emergency_contacts/domain/services/url_launcher_sms_launcher.da
 import 'features/emergency_contacts/domain/usecases/get_emergency_contacts_usecase.dart';
 import 'features/emergency_contacts/domain/usecases/save_emergency_contacts_usecase.dart';
 import 'features/emergency_contacts/presentation/providers/emergency_contacts_provider.dart';
+import 'features/profile/data/datasources/profile_remote_datasource.dart';
+import 'features/profile/data/repositories/profile_repository_impl.dart';
+import 'features/profile/domain/repositories/profile_repository.dart';
+import 'features/profile/domain/usecases/update_profile_usecase.dart';
 import 'features/register/data/datasources/register_remote_datasource.dart';
 import 'features/register/data/repositories/register_repository_impl.dart';
 import 'features/register/domain/repositories/register_repository.dart';
@@ -247,4 +251,21 @@ Future<void> setupServiceLocator() async {
       realtimeService: sl<RealtimeService>(),
     ),
   );
+
+  // Profile — data
+  sl.registerLazySingleton<ProfileRemoteDataSource>(
+    () => ProfileRemoteDataSourceImpl(dio: sl<Dio>()),
+  );
+  sl.registerLazySingleton<ProfileRepository>(
+    () => ProfileRepositoryImpl(sl<ProfileRemoteDataSource>()),
+  );
+
+  // Profile — domain
+  sl.registerLazySingleton<UpdateProfileUseCase>(
+    () => UpdateProfileUseCase(sl<ProfileRepository>()),
+  );
+  // ProfileEditProvider itself is constructed directly in
+  // ProfileEditPage (needs the runtime currentUser + an onUpdated callback
+  // into MainNavigationProvider, same convention as MainNavigationProvider
+  // being constructed directly in MainPage rather than via a get_it factory).
 }
